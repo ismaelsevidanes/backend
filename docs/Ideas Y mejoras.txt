@@ -1,8 +1,4 @@
--Que el authenticator de admin o no sea por el email:
-    - Es decir que si el correo es @dreamers.com sea admin si no nó
-
-
--Las reservas y pagos se eliminen de la bd cada x tiempo
+-Las reservas y pagos se eliminen de la bd cada x tiempo ???
 
 -Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas)
 
@@ -12,16 +8,21 @@
 
 -Que al obtener el token del usuario (al hacer login) si es un user normal no obtener token por ende no poder hacer las solicitudes a las api
 
--Implementar en el register y solicitud api un confirm password
+-Implementar en el register y solicitud api de register un confirm password
 
 -Que los modelos de fields, payments y reservations tenga un campo unico (se pueden crear con nombres iguales pero no pueden ser null)
 
 -En el modelo reservations:
-    -El total price sea la suma de todas las reservas al mismo campo de futbol, por ejemplo si un campo se reserva por 5 personas, no cuesta lo mismo lo reseva 10 
     - Incluir un campo que sea user_id para saber que usuarios han reservado ese campo de futbol (aunque perderia el significado de total price de la tabla)
 
--Mejorar validacón contraseña
+-Mejorar validacón contraseña (que tenga 1 simbolo y 1 mayuscula)
 
 -navegar por las pestañas de admin solo si estas logueado o registrado como administrador
 
-Cambiar el atributo directions por address
+-Cambiar el atributo directions por address
+
+-Para el login y register postman tiene una interfaz bastante asemejante a lo que busco
+
+-Poner la misma validacion en el frontend del register que el update user del dashboard admin 
+
+- Los created_at y updated_at tienen zona horario utc+0 y no horario español (utc+2)

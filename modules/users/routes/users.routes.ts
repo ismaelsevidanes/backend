@@ -4,6 +4,7 @@ import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
 import bcrypt from 'bcrypt';
+import { body, validationResult } from 'express-validator';
 
 const router = express.Router();
 
@@ -64,34 +65,60 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // Ruta para actualizar un usuario existente
-router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
-  const { id } = req.params;
-  const { name, email, password } = req.body;
+router.put(
+  '/:id',
+  [
+    body('name').notEmpty().withMessage('El nombre es obligatorio'),
+    body('email').isEmail().withMessage('Debe ser un email válido'),
+    body('password')
+      .optional()
+      .isLength({ min: 6 })
+      .withMessage('La contraseña debe tener al menos 6 caracteres'),
+    body('role').optional().isIn(['user', 'admin']).withMessage('El rol debe ser user o admin'),
+  ],
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
 
-  // Determinar el rol basado en el dominio del correo electrónico
-  const role = email.endsWith('@dreamer.com') ? 'admin' : 'user';
+    const { id } = req.params;
+    const { name, email, password, role } = req.body;
 
-  (async () => {
     try {
       const connection = await pool.getConnection();
+
+      // Encriptar la contraseña si se proporciona
+      const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
+
+      // Determinar el rol basado en el dominio del correo electrónico
+      const roleFromEmail = email.endsWith('@dreamer.com') ? 'admin' : 'user';
+
+      // Usar el rol proporcionado en el cuerpo de la solicitud o asignar automáticamente
+      const finalRole = role || roleFromEmail;
+
       const [result] = await connection.query<OkPacket>(
-        'UPDATE users SET name = ?, email = ?, password = ?, role = ? WHERE id = ?',
-        [name, email, password, role, id]
+        `UPDATE users 
+         SET name = ?, email = ?, password = COALESCE(?, password), role = ? 
+         WHERE id = ?`,
+        [name, email, hashedPassword, finalRole, id]
       );
       connection.release();
 
       if (result.affectedRows === 0) {
-        return res.status(404).json({ message: 'Usuario no encontrado' });
+        res.status(404).json({ message: 'Usuario no encontrado' });
+        return;
       }
 
-      console.log(`Usuario actualizado: ID ${id}, ${name}, Email: ${email}, Rol: ${role}`);
+      console.log(`Usuario actualizado: ID ${id}, ${name}, Email: ${email}, Rol: ${finalRole}`);
       res.json({ message: 'Usuario actualizado correctamente' });
     } catch (error) {
       console.error('Error al actualizar el usuario:', error);
-      res.status(500).json({ message: 'Error al actualizar el usuario' });
+      next(error); // Pasar el error al middleware de manejo de errores
     }
-  })().catch(next);
-});
+  }
+);
 
 // Ruta para eliminar un usuario
 router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
