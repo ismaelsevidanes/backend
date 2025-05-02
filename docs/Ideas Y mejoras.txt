@@ -23,3 +23,5 @@
 -Mejorar validacón contraseña
 
 -navegar por las pestañas de admin solo si estas logueado o registrado como administrador
+
+Cambiar el atributo directions por address
