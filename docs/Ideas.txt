@@ -1,0 +1,13 @@
+Que el authenticator de admin o no sea por el email:
+    - Es decir que si el correo es @dreamers.com sea admin si no nó
+
+
+Las reservas y pagos se eliminen de la bd cada xd tiempo
+
+Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas)
+
+Reiniciar postman o el pc en caso de que no se efectuen los cambios
+
+En el Readme.Md poner guia de instalacion 
+
+crear datos automaticos 
