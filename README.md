@@ -1,4 +1,4 @@
-# Proyecto de Alquiler de Campos de Fútbol
+# Pitch Dreamers
 
 Este proyecto está dividido en dos partes principales: **frontend** y **backend**, ambos desarrollados con TypeScript. A continuación, se describen los pasos de instalación, la estructura del proyecto y las funcionalidades implementadas hasta ahora.
 
