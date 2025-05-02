@@ -1,8 +1,8 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { authenticateToken } from '../../../src/middlewares/authMiddleware';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
-import { RowDataPacket } from 'mysql2';
+import { RowDataPacket, OkPacket } from 'mysql2';
 
 const router = express.Router();
 
@@ -10,20 +10,17 @@ const router = express.Router();
 router.use(authenticateToken);
 
 // Ruta para obtener todas las reservas con paginación
-router.get('/', async (req, res) => {
-  console.log('Solicitud recibida en /api/reservations'); // Log para confirmar que la ruta está siendo alcanzada
+router.get('/', async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
 
   try {
     const connection = await pool.getConnection();
 
-    // Obtener el total de reservas
     const [totalResult] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM reservations');
     const totalReservations = totalResult[0].total;
     const totalPages = Math.ceil(totalReservations / DEFAULT_PAGE_SIZE);
 
-    // Obtener las reservas paginadas
     const [reservations] = await connection.query<RowDataPacket[]>(
       'SELECT * FROM reservations LIMIT ? OFFSET ?',
       [DEFAULT_PAGE_SIZE, offset]
@@ -38,6 +35,92 @@ router.get('/', async (req, res) => {
     console.error('Error al obtener las reservas:', error);
     res.status(500).json({ message: 'Error al obtener las reservas' });
   }
+});
+
+// Ruta para crear una nueva reserva
+router.post('/', async (req: Request, res: Response) => {
+  const { field_id, start_time, end_time, total_price } = req.body;
+
+  try {
+    const connection = await pool.getConnection();
+    await connection.query(
+      'INSERT INTO reservations (field_id, start_time, end_time, total_price) VALUES (?, ?, ?, ?)',
+      [field_id, start_time, end_time, total_price]
+    );
+    connection.release();
+
+    console.log(`Reserva creada: Campo ID ${field_id}, Inicio: ${start_time}, Fin: ${end_time}, Precio total: ${total_price}`);
+    res.status(201).json({ message: 'Reserva creada correctamente' });
+  } catch (error) {
+    console.error('Error al crear la reserva:', error);
+    res.status(500).json({ message: 'Error al crear la reserva' });
+  }
+});
+
+// Ruta para actualizar una reserva existente
+router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+  const { field_id, start_time, end_time, total_price } = req.body;
+
+  (async () => {
+    try {
+      const connection = await pool.getConnection();
+      const [result] = await connection.query<OkPacket>(
+        'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, total_price = ? WHERE id = ?',
+        [field_id, start_time, end_time, total_price, id]
+      );
+      connection.release();
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Reserva no encontrada' });
+      }
+
+      console.log(`Reserva actualizada: ID ${id}, Campo ID ${field_id}, Inicio: ${start_time}, Fin: ${end_time}, Precio total: ${total_price}`);
+      res.json({ message: 'Reserva actualizada correctamente' });
+    } catch (error) {
+      console.error('Error al actualizar la reserva:', error);
+      res.status(500).json({ message: 'Error al actualizar la reserva' });
+    }
+  })().catch(next);
+});
+
+// Ruta para eliminar una reserva
+router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
+  const { id } = req.params;
+
+  (async () => {
+    try {
+      const connection = await pool.getConnection();
+
+      const [reservationResult] = await connection.query<RowDataPacket[]>(
+        'SELECT * FROM reservations WHERE id = ?',
+        [id]
+      );
+
+      if (reservationResult.length === 0) {
+        connection.release();
+        return res.status(404).json({ message: 'Reserva no encontrada' });
+      }
+
+      const reservation = reservationResult[0];
+
+      const [result] = await connection.query<OkPacket>(
+        'DELETE FROM reservations WHERE id = ?',
+        [id]
+      );
+      connection.release();
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Reserva no encontrada' });
+      }
+
+      console.log(`Reserva eliminada: ID ${reservation.id}, Campo ID ${reservation.field_id}, Inicio: ${reservation.start_time}, Fin: ${reservation.end_time}, Precio total: ${reservation.total_price}`);
+      res.json({ message: 'Reserva eliminada correctamente' });
+    } catch (error) {
+      console.error('Error al eliminar la reserva:', error);
+      res.status(500).json({ message: 'Error al eliminar la reserva' });
+    }
+  })().catch(next);
 });
 
 export default router;

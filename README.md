@@ -1,6 +1,6 @@
 # Pitch Dreamers
 
-Este proyecto está dividido en dos partes principales: **frontend** y **backend**, ambos desarrollados con TypeScript. A continuación, se describen los pasos de instalación, la estructura del proyecto y las funcionalidades implementadas hasta ahora.
+Este proyecto está dividido en dos partes principales: **frontend** y **backend**, el frontend mediante react y el backned Typescript. A continuación, se describen los pasos de instalación, la estructura del proyecto y las funcionalidades implementadas hasta ahora.
 
 ---
 
@@ -73,4 +73,4 @@ Este proyecto está dividido en dos partes principales: **frontend** y **backend
 
 ---
 
-Este archivo se actualizará a medida que avancemos en el desarrollo del proyecto.
+Este archivo se actualizará a medida que avance en el desarrollo del proyecto.
