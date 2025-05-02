@@ -11,3 +11,6 @@ Reiniciar postman o el pc en caso de que no se efectuen los cambios
 En el Readme.Md poner guia de instalacion 
 
 crear datos automaticos 
+
+
+Que al obtener el token del usuario (al hacer login) si es un user normal no obtener token por ende no poder hacer las solicitudes a las api
