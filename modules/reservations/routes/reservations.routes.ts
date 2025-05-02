@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticateToken } from '../../../src/middlewares/authMiddleware';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
+import { RowDataPacket } from 'mysql2';
 
 const router = express.Router();
 
@@ -16,13 +17,23 @@ router.get('/', async (req, res) => {
 
   try {
     const connection = await pool.getConnection();
-    const [reservations] = await connection.query(
+
+    // Obtener el total de reservas
+    const [totalResult] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM reservations');
+    const totalReservations = totalResult[0].total;
+    const totalPages = Math.ceil(totalReservations / DEFAULT_PAGE_SIZE);
+
+    // Obtener las reservas paginadas
+    const [reservations] = await connection.query<RowDataPacket[]>(
       'SELECT * FROM reservations LIMIT ? OFFSET ?',
       [DEFAULT_PAGE_SIZE, offset]
     );
     connection.release();
 
-    res.json(reservations);
+    res.json({
+      data: reservations,
+      totalPages,
+    });
   } catch (error) {
     console.error('Error al obtener las reservas:', error);
     res.status(500).json({ message: 'Error al obtener las reservas' });

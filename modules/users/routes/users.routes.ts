@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticateToken } from '../../../src/middlewares/authMiddleware';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
+import { RowDataPacket } from 'mysql2';
 
 const router = express.Router();
 
@@ -16,13 +17,23 @@ router.get('/', async (req, res) => {
 
   try {
     const connection = await pool.getConnection();
-    const [users] = await connection.query(
+
+    // Obtener el total de usuarios
+    const [totalResult] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM users');
+    const totalUsers = totalResult[0].total;
+    const totalPages = Math.ceil(totalUsers / DEFAULT_PAGE_SIZE);
+
+    // Obtener los usuarios paginados
+    const [users] = await connection.query<RowDataPacket[]>(
       'SELECT * FROM users LIMIT ? OFFSET ?',
       [DEFAULT_PAGE_SIZE, offset]
     );
     connection.release();
 
-    res.json(users);
+    res.json({
+      data: users,
+      totalPages,
+    });
   } catch (error) {
     console.error('Error al obtener los usuarios:', error);
     res.status(500).json({ message: 'Error al obtener los usuarios' });

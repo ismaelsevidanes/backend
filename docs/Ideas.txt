@@ -6,11 +6,8 @@ Las reservas y pagos se eliminen de la bd cada xd tiempo
 
 Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas)
 
-Reiniciar postman o el pc en caso de que no se efectuen los cambios
+En el Readme.Md poner guia de instalacion e indiciaciones como el otro proyecto
 
-En el Readme.Md poner guia de instalacion 
-
-crear datos automaticos 
-
+crear datos automaticos (como el seeder de laravel) 
 
 Que al obtener el token del usuario (al hacer login) si es un user normal no obtener token por ende no poder hacer las solicitudes a las api

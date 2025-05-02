@@ -13,13 +13,23 @@ router.get('/', async (req, res) => {
 
   try {
     const connection = await pool.getConnection();
+
+    // Obtener el total de campos
+    const [totalResult] = await connection.query<RowDataPacket[]>('SELECT COUNT(*) as total FROM fields');
+    const totalFields = totalResult[0].total;
+    const totalPages = Math.ceil(totalFields / DEFAULT_PAGE_SIZE);
+
+    // Obtener los campos paginados
     const [fields] = await connection.query<RowDataPacket[]>(
       'SELECT * FROM fields LIMIT ? OFFSET ?',
       [DEFAULT_PAGE_SIZE, offset]
     );
     connection.release();
 
-    res.json(fields);
+    res.json({
+      data: fields,
+      totalPages,
+    });
   } catch (error) {
     console.error('Error al obtener los campos:', error);
     res.status(500).json({ message: 'Error al obtener los campos' });
