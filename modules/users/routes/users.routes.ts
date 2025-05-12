@@ -214,6 +214,97 @@ router.put(
 /**
  * @swagger
  * /api/users/{id}:
+ *   patch:
+ *     summary: Actualiza campos específicos de un usuario existente (Borrar en el Body los campos que no se quieren actualizar)
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del usuario
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *                 enum: [user, admin]
+ *     responses:
+ *       200:
+ *         description: Usuario actualizado correctamente
+ *       404:
+ *         description: Usuario no encontrado
+ *       500:
+ *         description: Error al actualizar el usuario
+ */
+router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const { id } = req.params;
+  const { name, email, password, role } = req.body;
+
+  try {
+    const connection = await pool.getConnection();
+
+    // Construir dinámicamente la consulta de actualización
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (name) {
+      updates.push('name = ?');
+      values.push(name);
+    }
+    if (email) {
+      updates.push('email = ?');
+      values.push(email);
+    }
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updates.push('password = ?');
+      values.push(hashedPassword);
+    }
+    if (role) {
+      updates.push('role = ?');
+      values.push(role);
+    }
+
+    if (updates.length === 0) {
+      res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+      return;
+    }
+
+    values.push(id);
+
+    const [result] = await connection.query<OkPacket>(
+      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
+      values
+    );
+    connection.release();
+
+    if (result.affectedRows === 0) {
+      res.status(404).json({ message: 'Usuario no encontrado' });
+      return;
+    }
+
+    res.json({ message: 'Usuario actualizado correctamente' });
+  } catch (error) {
+    console.error('Error al actualizar el usuario:', error);
+    next(error); // Pasar el error al middleware de manejo de errores
+  }
+});
+
+/**
+ * @swagger
+ * /api/users/{id}:
  *   delete:
  *     summary: Elimina un usuario existente
  *     tags: [Users]

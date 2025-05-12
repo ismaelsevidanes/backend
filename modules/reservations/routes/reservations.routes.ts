@@ -183,6 +183,96 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
 /**
  * @swagger
  * /api/reservations/{id}:
+ *   patch:
+ *     summary: Actualiza campos específicos de un usuario existente (Borrar en el Body los campos que no se quieren actualizar)
+ *     tags: [Reservations]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID de la reserva
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               field_id:
+ *                 type: integer
+ *               start_time:
+ *                 type: string
+ *                 format: date-time
+ *               end_time:
+ *                 type: string
+ *                 format: date-time
+ *               total_price:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Reserva actualizada correctamente
+ *       404:
+ *         description: Reserva no encontrada
+ *       500:
+ *         description: Error al actualizar la reserva
+ */
+router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const { id } = req.params;
+  const { field_id, start_time, end_time, total_price } = req.body;
+
+  try {
+    const connection = await pool.getConnection();
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (field_id) {
+      updates.push('field_id = ?');
+      values.push(field_id);
+    }
+    if (start_time) {
+      updates.push('start_time = ?');
+      values.push(start_time);
+    }
+    if (end_time) {
+      updates.push('end_time = ?');
+      values.push(end_time);
+    }
+    if (total_price) {
+      updates.push('total_price = ?');
+      values.push(total_price);
+    }
+
+    if (updates.length === 0) {
+      res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+      return;
+    }
+
+    values.push(id);
+
+    const [result] = await connection.query<OkPacket>(
+      `UPDATE reservations SET ${updates.join(', ')} WHERE id = ?`,
+      values
+    );
+    connection.release();
+
+    if (result.affectedRows === 0) {
+      res.status(404).json({ message: 'Reserva no encontrada' });
+      return;
+    }
+
+    res.json({ message: 'Reserva actualizada correctamente' });
+  } catch (error) {
+    console.error('Error al actualizar la reserva:', error);
+    next(error);
+  }
+});
+
+/**
+ * @swagger
+ * /api/reservations/{id}:
  *   delete:
  *     summary: Elimina una reserva existente
  *     tags: [Reservations]

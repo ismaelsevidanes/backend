@@ -19,8 +19,6 @@
 
 -navegar por las pestañas de admin solo si estas logueado o registrado como administrador
 
--Cambiar el atributo directions por address
-
 -Para el login y register postman tiene una interfaz bastante asemejante a lo que busco
 
 -Poner la misma validacion en el frontend del register que el update user del dashboard admin 
