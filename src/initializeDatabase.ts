@@ -9,7 +9,7 @@ async function initializeDatabase() {
       user: 'root',
       password: 'root',
     });
-    await connection.query('CREATE DATABASE IF NOT EXISTS futbol_rentals');
+    await connection.query('CREATE DATABASE IF NOT EXISTS dreamer');
     console.log('Base de datos creada o ya existente.');
     await connection.end();
 
@@ -35,7 +35,7 @@ async function initializeDatabase() {
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(255) NOT NULL,
           description TEXT,
-          directions VARCHAR(255),
+          address VARCHAR(255),
           location VARCHAR(255),
           price_per_hour DECIMAL(8, 2) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

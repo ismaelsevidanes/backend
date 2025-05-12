@@ -10,6 +10,44 @@ const router = express.Router();
 // Clave secreta para JWT
 const JWT_SECRET = 'your_jwt_secret_key';
 
+/**
+ * @swagger
+ * tags:
+ *   name: Auth
+ *   description: Endpoints relacionados con la autenticación de usuarios
+ */
+
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     summary: Registra un nuevo usuario
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Nombre del usuario
+ *               email:
+ *                 type: string
+ *                 description: Correo electrónico del usuario
+ *               password:
+ *                 type: string
+ *                 description: Contraseña del usuario
+ *     responses:
+ *       201:
+ *         description: Usuario registrado correctamente
+ *       400:
+ *         description: Error en la validación o el correo ya está en uso
+ *       500:
+ *         description: Error al registrar el usuario
+ */
+
 // Endpoint para registrar usuarios
 router.post(
   '/register',
@@ -66,6 +104,36 @@ router.post(
     }
   }
 );
+
+/**
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     summary: Inicia sesión con un usuario existente
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 description: Correo electrónico del usuario
+ *               password:
+ *                 type: string
+ *                 description: Contraseña del usuario
+ *     responses:
+ *       200:
+ *         description: Inicio de sesión exitoso
+ *       400:
+ *         description: Error en la validación
+ *       401:
+ *         description: Credenciales inválidas
+ *       500:
+ *         description: Error al iniciar sesión
+ */
 
 // Endpoint para iniciar sesión
 router.post(
