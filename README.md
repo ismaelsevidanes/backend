@@ -1,38 +1,52 @@
-# Pitch Dreamers
+# PITCH DREAMERS
 
-Este proyecto está dividido en dos partes principales: **frontend** y **backend**, el frontend mediante React y el backend con TypeScript. A continuación, se describen los pasos de instalación, la estructura del proyecto y las funcionalidades implementadas hasta ahora.
+#### Curso Escolar 2024-2025
+#### Autor: [Ismael Sevidanes Del Moral](https://github.com/ismaelsevidanes/)
+#### Tutor: [Antonio Gabriel González Casado](https://github.com/prof-antonio-gabriel)
+#### Tutor del Proyecto: [Mónica María Marcos Gutiérrez]
+#### Fecha de Inicio: 01-03-2025
+#### Fecha de Finalización: xx-x-2025
+
+## Breve descripción del proyecto
+
+Este proyecto trata de una aplicación web sobre el funcionamiento de poder reservar y alquilar campos de fútbol de la localidad de Sevilla principalmente, ya sea campos de fútbol 7 como fútbol 11, en campos memorables y de césped artificial como natural, de equipos de pueblos o incluso campos de categorías mayores, donde sus prestaciones son mayores.
+
+## Objetivo de la aplicación
+- **¿Qué va a hacer la aplicación?**  
+    Pitch Dreamers es una aplicación web que permite reservar y alquilar campos de fútbol de forma sencilla y online.
+    
+- **¿Cuál es su atractivo principal?**  
+    Las principales características atractivas son: operar de forma online, la facilidad de uso, intuitivo para todos los usuarios y clara navegación. Poder conocer a personas y jugar con ellos.
+ 
+- **¿Qué problema concreto va a resolver?**  
+    El problema que resuelve la aplicación es la dificultad de reservar campos de fútbol de diversas ciudades o pueblos, teniendo que tener contacto con algún gerente de allí o reservar de forma presencial a cierta hora.
+      
+- **¿Qué necesidad va a cubrir?**  
+    Las necesidades que cubre son poder usar la aplicación de forma sencilla y de forma online para poder jugar al fútbol con tus amigos o con personas que también reserven en el mismo campo y hora que tu reserva.
 
 ---
 
-## Requisitos
+## Objetivo del Backend
+El objetivo del backend es proporcionar una API robusta, segura y eficiente para gestionar la lógica de negocio, autenticación, reservas, pagos y administración de usuarios y campos de fútbol. El backend se encarga de la persistencia de datos, la validación, la seguridad y la integración con la base de datos MySQL, sirviendo como núcleo de la aplicación y punto de integración con el frontend.
 
-### Backend
+---
+
+# Pitch Dreamers (Backend)
+
+Este proyecto corresponde al backend de Pitch Dreamers, desarrollado con TypeScript, Express y MySQL. Aquí se detallan los pasos de instalación, estructura y funcionalidades implementadas.
+
+## Requisitos
 - Node.js (versión más reciente recomendada)
 - MySQL (para la base de datos)
 
-### Frontend
-- Node.js (versión más reciente recomendada)
-
----
-
 ## Instalación
-
-### Pasos generales
-1. Clona este repositorio:
+1. Clona este repositorio y navega a la carpeta backend:
    ```bash
-   git clone
-   ```
-2. Navega a la carpeta del proyecto:
-   ```bash
+   git clone https://github.com/ismaelsevidanes/backend.git
    cd backend
-   ```
-
-### Backend
-1. Instala las dependencias:
-   ```bash
    npm install
    ```
-2. Configura la base de datos MySQL en el archivo `backend/config/database.ts`.
+2. Configura la base de datos MySQL en el archivo `config/database.ts`.
 3. Ejecuta el script para inicializar la base de datos y crear las tablas:
    ```bash
    npx ts-node src/initializeDatabase.ts
@@ -46,22 +60,7 @@ Este proyecto está dividido en dos partes principales: **frontend** y **backend
    npm run dev
    ```
 
-### Frontend
-1. Instala las dependencias:
-   ```bash
-   cd frontend
-   npm install
-   ```
-2. Inicia el servidor de desarrollo:
-   ```bash
-   npm run dev
-   ```
-
----
-
 ## Despliegue
-
-### Backend
 1. Compila el proyecto:
    ```bash
    npm run build
@@ -70,13 +69,7 @@ Este proyecto está dividido en dos partes principales: **frontend** y **backend
    ```bash
    npm start
    ```
-
-### Frontend
-1. Compila el proyecto para producción:
-   ```bash
-   npm run build
-   ```
-2. Sirve los archivos estáticos generados en la carpeta `dist` con un servidor como `serve` o `nginx`.
+3. Sirve los archivos estáticos generados en la carpeta `dist` con un servidor como `serve` o `nginx`.
 
 ---
 
@@ -86,38 +79,25 @@ El backend incluye documentación automática generada con Swagger. Para acceder
 1. Inicia el servidor del backend.
 2. Abre un navegador y navega a:
    ```
-   http://localhost:3000/api-docs
+   http://localhost:3000/v3/api-docs
    ```
 
----
-
 ## Estructura del Proyecto
-
-### Backend
 - **`shared/models`**: Define los modelos de datos en TypeScript.
-- **`src`**: Contiene los scripts principales como la inicialización de la base de datos y la inserción de datos iniciales.
+- **`src`**: Scripts principales como la inicialización de la base de datos y la inserción de datos iniciales.
 - **`config`**: Configuración de la base de datos y otras configuraciones globales.
-- **`modules`**: Contiene las rutas y lógica de negocio para cada entidad (auth, fields, payments, reservations, users).
-
-### Frontend
-- **`src/features`**: Contiene las funcionalidades principales del proyecto.
-- **`src/shared`**: Componentes y utilidades reutilizables.
-- **`src/pages`**: Páginas principales de la aplicación.
-
----
+- **`modules`**: Rutas y lógica de negocio para cada entidad (auth, fields, payments, reservations, users).
 
 ## Funcionalidades Implementadas
-
-### Backend
 1. **Estructura inicial:**
    - Configuración de Express.
-   - Rutas básicas para `fields`, `reservations`, `users`, y `payments`.
+   - Rutas básicas para `fields`,`users`, `reservations` y `payments`.
 2. **Base de datos:**
    - Script para inicializar la base de datos y crear las tablas.
    - Script para insertar datos iniciales en las tablas.
 3. **Autenticación:**
-   - Middleware para proteger rutas específicas (`users`, `reservations`, `payments`).
-   - Rutas públicas para `fields`.
+   - Middleware para proteger rutas específicas (`fields`,`users`, `reservations`, `payments,`).
+   - Ruta pública de obtener todos los `fields`.
 4. **Paginación:**
    - Implementada en todas las rutas para manejar grandes volúmenes de datos (50 elementos por página).
 5. **Centralización de parámetros:**
@@ -125,7 +105,8 @@ El backend incluye documentación automática generada con Swagger. Para acceder
 6. **Documentación automática:**
    - Swagger configurado para documentar todas las rutas de la API.
 
-### Frontend
-1. **Estructura inicial:**
-   - Configuración de React y TypeScript.
-   - Estructura basada en Screaming Architecture.
+---
+
+## Autor y Créditos
+- Autor: [Ismael Sevidanes Del Moral](https://github.com/ismaelsevidanes/)
+- Tutor: [Antonio Gabriel González Casado](https://github.com/prof-antonio-gabriel)

@@ -24,3 +24,5 @@
 -Poner la misma validacion en el frontend del register que el update user del dashboard admin 
 
 - Los created_at y updated_at tienen zona horario utc+0 y no horario español (utc+2)
+
+- Implementar las validaciones en los actualizar igual, como esta en los crear
