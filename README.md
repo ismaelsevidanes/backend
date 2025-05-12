@@ -3,7 +3,7 @@
 #### Curso Escolar 2024-2025
 #### Autor: [Ismael Sevidanes Del Moral](https://github.com/ismaelsevidanes/)
 #### Tutor: [Antonio Gabriel González Casado](https://github.com/prof-antonio-gabriel)
-#### Tutor del Proyecto: [Mónica María Marcos Gutiérrez]
+#### Tutor del Proyecto: Mónica María Marcos Gutiérrez
 #### Fecha de Inicio: 01-03-2025
 #### Fecha de Finalización: xx-x-2025
 
@@ -110,3 +110,4 @@ El backend incluye documentación automática generada con Swagger. Para acceder
 ## Autor y Créditos
 - Autor: [Ismael Sevidanes Del Moral](https://github.com/ismaelsevidanes/)
 - Tutor: [Antonio Gabriel González Casado](https://github.com/prof-antonio-gabriel)
+- Tutor del Proyecto: Mónica María Marcos Gutiérrez
