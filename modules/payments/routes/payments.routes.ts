@@ -6,6 +6,122 @@ import { RowDataPacket, OkPacket } from 'mysql2';
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * tags:
+ *   name: Payments
+ *   description: Endpoints relacionados con la gestión de pagos
+ */
+
+/**
+ * @swagger
+ * /api/payments:
+ *   get:
+ *     summary: Obtiene todos los pagos con paginación
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *     responses:
+ *       200:
+ *         description: Lista de pagos
+ *       500:
+ *         description: Error al obtener los pagos
+ */
+
+/**
+ * @swagger
+ * /api/payments:
+ *   post:
+ *     summary: Crea un nuevo pago
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reservation_id:
+ *                 type: integer
+ *               amount:
+ *                 type: number
+ *               payment_method:
+ *                 type: string
+ *               paid_at:
+ *                 type: string
+ *                 format: date-time
+ *     responses:
+ *       201:
+ *         description: Pago creado correctamente
+ *       500:
+ *         description: Error al crear el pago
+ */
+
+/**
+ * @swagger
+ * /api/payments/{id}:
+ *   put:
+ *     summary: Actualiza un pago existente
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del pago
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reservation_id:
+ *                 type: integer
+ *               amount:
+ *                 type: number
+ *               payment_method:
+ *                 type: string
+ *               paid_at:
+ *                 type: string
+ *                 format: date-time
+ *     responses:
+ *       200:
+ *         description: Pago actualizado correctamente
+ *       404:
+ *         description: Pago no encontrado
+ *       500:
+ *         description: Error al actualizar el pago
+ */
+
+/**
+ * @swagger
+ * /api/payments/{id}:
+ *   delete:
+ *     summary: Elimina un pago existente
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del pago
+ *     responses:
+ *       200:
+ *         description: Pago eliminado correctamente
+ *       404:
+ *         description: Pago no encontrado
+ *       500:
+ *         description: Error al eliminar el pago
+ */
+
 // Proteger las rutas de pagos con el middleware de autenticación
 router.use(authenticateToken);
 

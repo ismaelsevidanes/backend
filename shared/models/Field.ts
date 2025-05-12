@@ -2,7 +2,7 @@ export interface Field {
   id: number;
   name: string;
   description?: string;
-  directions?: string;
+  address?: string;
   location?: string;
   pricePerHour: number;
   createdAt: Date;

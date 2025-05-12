@@ -1,10 +1,12 @@
 import { createPool } from 'mysql2/promise';
 
+const databaseName = 'dreamer';
+
 const pool = createPool({
   host: 'localhost',
   user: 'root',
   password: 'root',
-  database: 'futbol_rentals',
+  database: databaseName,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,

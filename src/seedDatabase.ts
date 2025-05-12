@@ -20,13 +20,13 @@ async function seedDatabase() {
 
     // Insertar o actualizar datos en la tabla 'fields'
     await connection.query(`
-      INSERT INTO fields (id, name, description, directions, location, price_per_hour) VALUES
+      INSERT INTO fields (id, name, description, address, location, price_per_hour) VALUES
       (1, 'Campo de Fútbol 1', 'Campo con césped natural', 'Calle Fútbol, 123', 'Ciudad A', 50.00),
       (2, 'Campo de Fútbol 2', 'Campo con césped artificial', 'Avenida Deportes, 456', 'Ciudad B', 40.00)
       ON DUPLICATE KEY UPDATE
       name = VALUES(name),
       description = VALUES(description),
-      directions = VALUES(directions),
+      address = VALUES(address),
       location = VALUES(location),
       price_per_hour = VALUES(price_per_hour);
     `);

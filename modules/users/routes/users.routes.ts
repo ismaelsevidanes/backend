@@ -8,9 +8,35 @@ import { body, validationResult } from 'express-validator';
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * tags:
+ *   name: Users
+ *   description: Endpoints relacionados con la gestión de usuarios
+ */
+
 // Proteger las rutas de usuarios con el middleware de autenticación
 router.use(authenticateToken);
 
+/**
+ * @swagger
+ * /api/users:
+ *   get:
+ *     summary: Obtiene todos los usuarios con paginación
+ *     tags: [Users]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *     responses:
+ *       200:
+ *         description: Lista de usuarios
+ *       500:
+ *         description: Error al obtener los usuarios
+ */
 // Ruta para obtener todos los usuarios con paginación
 router.get('/', async (req: Request, res: Response) => {
   console.log('Solicitud recibida en /api/users'); // Log para confirmar que la ruta está siendo alcanzada
@@ -42,6 +68,34 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/users:
+ *   post:
+ *     summary: Crea un nuevo usuario
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *                 enum: [user, admin]
+ *     responses:
+ *       201:
+ *         description: Usuario creado correctamente
+ *       500:
+ *         description: Error al crear el usuario
+ */
 // Ruta para crear un nuevo usuario
 router.post('/', async (req: Request, res: Response) => {
   const { name, email, password, role } = req.body;
@@ -64,6 +118,43 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   put:
+ *     summary: Actualiza un usuario existente
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del usuario
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *                 enum: [user, admin]
+ *     responses:
+ *       200:
+ *         description: Usuario actualizado correctamente
+ *       404:
+ *         description: Usuario no encontrado
+ *       500:
+ *         description: Error al actualizar el usuario
+ */
 // Ruta para actualizar un usuario existente
 router.put(
   '/:id',
@@ -120,6 +211,27 @@ router.put(
   }
 );
 
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   delete:
+ *     summary: Elimina un usuario existente
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del usuario
+ *     responses:
+ *       200:
+ *         description: Usuario eliminado correctamente
+ *       404:
+ *         description: Usuario no encontrado
+ *       500:
+ *         description: Error al eliminar el usuario
+ */
 // Ruta para eliminar un usuario
 router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;

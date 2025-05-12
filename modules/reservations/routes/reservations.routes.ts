@@ -4,10 +4,37 @@ import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
 
+/**
+ * @swagger
+ * tags:
+ *   name: Reservations
+ *   description: Endpoints relacionados con la gestión de reservas
+ */
+
 const router = express.Router();
 
 // Proteger las rutas de reservas con el middleware de autenticación
 router.use(authenticateToken);
+
+/**
+ * @swagger
+ * /api/reservations:
+ *   get:
+ *     summary: Obtiene todas las reservas con paginación
+ *     tags: [Reservations]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *     responses:
+ *       200:
+ *         description: Lista de reservas
+ *       500:
+ *         description: Error al obtener las reservas
+ */
 
 // Ruta para obtener todas las reservas con paginación
 router.get('/', async (req: Request, res: Response) => {
@@ -37,6 +64,36 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/reservations:
+ *   post:
+ *     summary: Crea una nueva reserva
+ *     tags: [Reservations]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               field_id:
+ *                 type: integer
+ *               start_time:
+ *                 type: string
+ *                 format: date-time
+ *               end_time:
+ *                 type: string
+ *                 format: date-time
+ *               total_price:
+ *                 type: number
+ *     responses:
+ *       201:
+ *         description: Reserva creada correctamente
+ *       500:
+ *         description: Error al crear la reserva
+ */
+
 // Ruta para crear una nueva reserva
 router.post('/', async (req: Request, res: Response) => {
   const { field_id, start_time, end_time, total_price } = req.body;
@@ -56,6 +113,45 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error al crear la reserva' });
   }
 });
+
+/**
+ * @swagger
+ * /api/reservations/{id}:
+ *   put:
+ *     summary: Actualiza una reserva existente
+ *     tags: [Reservations]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID de la reserva
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               field_id:
+ *                 type: integer
+ *               start_time:
+ *                 type: string
+ *                 format: date-time
+ *               end_time:
+ *                 type: string
+ *                 format: date-time
+ *               total_price:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Reserva actualizada correctamente
+ *       404:
+ *         description: Reserva no encontrada
+ *       500:
+ *         description: Error al actualizar la reserva
+ */
 
 // Ruta para actualizar una reserva existente
 router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
@@ -83,6 +179,28 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
     }
   })().catch(next);
 });
+
+/**
+ * @swagger
+ * /api/reservations/{id}:
+ *   delete:
+ *     summary: Elimina una reserva existente
+ *     tags: [Reservations]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID de la reserva
+ *     responses:
+ *       200:
+ *         description: Reserva eliminada correctamente
+ *       404:
+ *         description: Reserva no encontrada
+ *       500:
+ *         description: Error al eliminar la reserva
+ */
 
 // Ruta para eliminar una reserva
 router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {

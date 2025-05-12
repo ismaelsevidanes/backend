@@ -6,6 +6,124 @@ import { RowDataPacket, OkPacket } from 'mysql2';
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * tags:
+ *   name: Fields
+ *   description: Endpoints relacionados con la gestión de campos
+ */
+
+/**
+ * @swagger
+ * /api/fields:
+ *   get:
+ *     summary: Obtiene todos los campos con paginación
+ *     tags: [Fields]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *     responses:
+ *       200:
+ *         description: Lista de campos
+ *       500:
+ *         description: Error al obtener los campos
+ */
+
+/**
+ * @swagger
+ * /api/fields:
+ *   post:
+ *     summary: Crea un nuevo campo
+ *     tags: [Fields]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               address:
+ *                 type: string
+ *               location:
+ *                 type: string
+ *               price_per_hour:
+ *                 type: number
+ *     responses:
+ *       201:
+ *         description: Campo creado correctamente
+ *       500:
+ *         description: Error al crear el campo
+ */
+
+/**
+ * @swagger
+ * /api/fields/{id}:
+ *   put:
+ *     summary: Actualiza un campo existente
+ *     tags: [Fields]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del campo
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               address:
+ *                 type: string
+ *               location:
+ *                 type: string
+ *               price_per_hour:
+ *                 type: number
+ *     responses:
+ *       200:
+ *         description: Campo actualizado correctamente
+ *       404:
+ *         description: Campo no encontrado
+ *       500:
+ *         description: Error al actualizar el campo
+ */
+
+/**
+ * @swagger
+ * /api/fields/{id}:
+ *   delete:
+ *     summary: Elimina un campo existente
+ *     tags: [Fields]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del campo
+ *     responses:
+ *       200:
+ *         description: Campo eliminado correctamente
+ *       404:
+ *         description: Campo no encontrado
+ *       500:
+ *         description: Error al eliminar el campo
+ */
+
 // Proteger las rutas de campos con el middleware de autenticación excepto para obtener todos los campos
 router.use((req, res, next) => {
   if (req.method === 'GET' && req.path === '/') {
@@ -44,13 +162,13 @@ router.get('/', async (req: Request, res: Response) => {
 
 // Ruta para crear un nuevo campo
 router.post('/', async (req: Request, res: Response) => {
-  const { name, description, directions, location, price_per_hour } = req.body;
+  const { name, description, address, location, price_per_hour } = req.body;
 
   try {
     const connection = await pool.getConnection();
     await connection.query(
-      'INSERT INTO fields (name, description, directions, location, price_per_hour) VALUES (?, ?, ?, ?, ?)',
-      [name, description, directions, location, price_per_hour]
+      'INSERT INTO fields (name, description, address, location, price_per_hour) VALUES (?, ?, ?, ?, ?)',
+      [name, description, address, location, price_per_hour]
     );
     connection.release();
 
@@ -65,14 +183,14 @@ router.post('/', async (req: Request, res: Response) => {
 // Ruta para actualizar un campo existente
 router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
-  const { name, description, directions, location, price_per_hour } = req.body;
+  const { name, description, address, location, price_per_hour } = req.body;
 
   (async () => {
     try {
       const connection = await pool.getConnection();
       const [result] = await connection.query<OkPacket>(
-        'UPDATE fields SET name = ?, description = ?, directions = ?, location = ?, price_per_hour = ? WHERE id = ?',
-        [name, description, directions, location, price_per_hour, id]
+        'UPDATE fields SET name = ?, description = ?, address = ?, location = ?, price_per_hour = ? WHERE id = ?',
+        [name, description, address, location, price_per_hour, id]
       );
       connection.release();
 
