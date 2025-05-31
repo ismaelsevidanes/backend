@@ -169,7 +169,8 @@ router.post(
         return;
       }
 
-      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1h' });
+      // Incluir el nombre y email en el token JWT
+      const token = jwt.sign({ id: user.id, role: user.role, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
 
       console.log(`Usuario logueado: ${email}, Rol: ${user.role}`); // Log para confirmar el inicio de sesión con rol
 
