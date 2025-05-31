@@ -82,8 +82,8 @@ router.post(
 
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Modificar el registro para asignar rol según el dominio del email
-      const role = email.endsWith('@dreamer.com') ? 'admin' : 'user';
+      // Asignar siempre el rol 'user' al registrar
+      const role = 'user';
 
       await connection.query(
         'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
@@ -91,7 +91,7 @@ router.post(
       );
       connection.release();
 
-      console.log(`Usuario registrado: ${name}, Email: ${email}, Rol: ${role}`); // Log para confirmar el registro con rol
+      console.log(`Usuario registrado: ${name}, Email: ${email}, Rol: ${role}`); // Log para confirmar el registro
 
       // Modificar la respuesta del registro para incluir el rol del usuario
       res.status(201).json({ message: 'Usuario registrado correctamente', role });

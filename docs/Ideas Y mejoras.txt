@@ -2,7 +2,7 @@
 
 -Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas)
 
--En el Readme.Md poner guia de instalacion e indiciaciones como el otro proyecto
+-En el Readme.Md poner guia de instalacion
 
 -crear datos de forma automatica (como el seeder de laravel) 
 
@@ -17,12 +17,12 @@
 
 -Mejorar validacón contraseña (que tenga 1 simbolo y 1 mayuscula)
 
--navegar por las pestañas de admin solo si estas logueado o registrado como administrador
-
--Para el login y register postman tiene una interfaz bastante asemejante a lo que busco
+-navegar por las pestañas de admin solo si estas logueado o registrado como administrador(rutas protegidas)
 
 -Poner la misma validacion en el frontend del register que el update user del dashboard admin 
 
 - Los created_at y updated_at tienen zona horario utc+0 y no horario español (utc+2)
 
 - Implementar las validaciones en los actualizar igual, como esta en los crear
+
+- En el login, que sea nombre de usuario o correo, en el primer input
