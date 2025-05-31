@@ -183,15 +183,12 @@ router.put(
       // Encriptar la contraseña si se proporciona
       const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
 
-      // Determinar el rol basado en el dominio del correo electrónico
-      const roleFromEmail = email.endsWith('@dreamer.com') ? 'admin' : 'user';
-
-      // Usar el rol proporcionado en el cuerpo de la solicitud o asignar automáticamente
-      const finalRole = role || roleFromEmail;
+      // Usar el rol proporcionado en el cuerpo de la solicitud o mantener el actual si no se envía
+      const finalRole = role || undefined;
 
       const [result] = await connection.query<OkPacket>(
         `UPDATE users 
-         SET name = ?, email = ?, password = COALESCE(?, password), role = ? 
+         SET name = ?, email = ?, password = COALESCE(?, password), role = COALESCE(?, role)
          WHERE id = ?`,
         [name, email, hashedPassword, finalRole, id]
       );
