@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
@@ -324,12 +325,15 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
   })().catch(next);
 });
 
-// Proteger las rutas de campos con el middleware de autenticación excepto para obtener todos los campos
+// Proteger las rutas de campos con el middleware de autenticación y blacklist excepto para obtener todos los campos
 router.use((req, res, next) => {
   if (req.method === 'GET' && req.path === '/') {
     return next(); // Permitir acceso sin autenticación para obtener todos los campos
   }
-  authenticateToken(req, res, next); // Requiere autenticación para las demás rutas
+  authenticateToken(req, res, (err?: any) => {
+    if (err) return next(err);
+    checkJwtBlacklist(req, res, next);
+  });
 });
 
 export default router;

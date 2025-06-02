@@ -13,8 +13,9 @@ const router = express.Router();
  *   description: Endpoints relacionados con la gestión de pagos
  */
 
-// Proteger las rutas de pagos con el middleware de autenticación
-router.use(authenticateToken);
+// Proteger las rutas de pagos con el middleware de autenticación y blacklist
+import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
+router.use(authenticateToken, checkJwtBlacklist);
 
 /**
  * @swagger

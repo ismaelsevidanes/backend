@@ -182,4 +182,41 @@ router.post(
   }
 );
 
+/**
+ * @swagger
+ * /auth/logout:
+ *   post:
+ *     summary: Cierra la sesión del usuario (logout)
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout exitoso
+ *       401:
+ *         description: Token inválido o expirado
+ */
+
+
+// Importar solo la función para añadir a la blacklist
+import { addTokenToBlacklist } from '../../../src/middlewares/jwtBlacklist';
+
+// Endpoint de logout con blacklist
+router.post('/logout', (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) {
+    res.status(400).json({ message: 'Token no proporcionado' });
+    return;
+  }
+  // Verificar si el token ya está en la blacklist
+  const { jwtBlacklist } = require('../../../src/middlewares/jwtBlacklist');
+  if (jwtBlacklist.has(token)) {
+    res.status(401).json({ message: 'Token inválido o expirado (blacklist)' });
+    return;
+  }
+  addTokenToBlacklist(token);
+  res.status(200).json({ message: 'Logout exitoso (token invalidado)' });
+});
+
 export default router;

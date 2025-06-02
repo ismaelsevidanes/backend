@@ -26,3 +26,7 @@
 - Implementar las validaciones en los actualizar igual, como esta en los crear
 
 - En el login, que sea nombre de usuario o correo, en el primer input
+
+En el dashboard que sea accesible (tabulacion) el logo y el icono 
+
+Al hacer el register que directamente se haga login con ese usuario

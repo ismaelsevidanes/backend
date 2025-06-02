@@ -13,8 +13,9 @@ import { RowDataPacket, OkPacket } from 'mysql2';
 
 const router = express.Router();
 
-// Proteger las rutas de reservas con el middleware de autenticación
-router.use(authenticateToken);
+// Proteger las rutas de reservas con el middleware de autenticación y blacklist
+import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
+router.use(authenticateToken, checkJwtBlacklist);
 
 /**
  * @swagger
