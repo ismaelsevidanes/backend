@@ -4,8 +4,6 @@
 
 -En el Readme.Md poner guia de instalacion
 
--crear datos de forma automatica (como el seeder de laravel) 
-
 -Que al obtener el token del usuario (al hacer login) si es un user normal no obtener token por ende no poder hacer las solicitudes a las api
 
 -Implementar en el register y solicitud api de register un confirm password
@@ -27,6 +25,5 @@
 
 - En el login, que sea nombre de usuario o correo, en el primer input
 
-En el dashboard que sea accesible (tabulacion) el logo y el icono 
 
 Al hacer el register que directamente se haga login con ese usuario
