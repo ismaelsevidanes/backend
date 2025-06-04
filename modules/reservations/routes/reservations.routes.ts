@@ -113,14 +113,30 @@ router.post('/', async (req: Request, res: Response) => {
 
   try {
     const connection = await pool.getConnection();
-    // 1. Crear la reserva
+    // 1. Obtener el tipo de campo
+    const [fieldRows] = await connection.query<RowDataPacket[]>(
+      'SELECT type FROM fields WHERE id = ?',
+      [field_id]
+    );
+    if (fieldRows.length === 0) {
+      connection.release();
+      res.status(404).json({ message: 'Campo no encontrado' });
+      return;
+    }
+    const fieldType = fieldRows[0].type;
+    const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+    if (user_ids.length > maxUsers) {
+      connection.release();
+      res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+      return;
+    }
+    // 2. Crear la reserva
     const [result] = await connection.query<OkPacket>(
       'INSERT INTO reservations (field_id, start_time, end_time, total_price) VALUES (?, ?, ?, ?)',
       [field_id, start_time, end_time, total_price]
     );
     const reservationId = result.insertId;
-
-    // 2. Insertar usuarios asociados en la tabla intermedia
+    // 3. Insertar usuarios asociados en la tabla intermedia
     for (const userId of user_ids) {
       await connection.query(
         'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
