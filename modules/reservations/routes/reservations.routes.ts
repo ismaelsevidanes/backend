@@ -70,7 +70,7 @@ router.get('/', async (req: Request, res: Response) => {
  * @swagger
  * /api/reservations:
  *   post:
- *     summary: Crea una nueva reserva
+ *     summary: Crea una nueva reserva con usuarios asociados
  *     tags: [Reservations]
  *     requestBody:
  *       required: true
@@ -89,55 +89,47 @@ router.get('/', async (req: Request, res: Response) => {
  *                 format: date-time
  *               total_price:
  *                 type: number
+ *               user_ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
  *     responses:
  *       201:
  *         description: Reserva creada correctamente
+ *       400:
+ *         description: Debes proporcionar al menos un usuario para la reserva
  *       500:
  *         description: Error al crear la reserva
  */
 
-// Ruta para crear una nueva reserva
-router.post('/', async (req: Request, res: Response): Promise<void> => {
-  const { field_id, start_time, end_time, total_price } = req.body;
+// Ruta para crear una nueva reserva con usuarios asociados
+router.post('/', async (req: Request, res: Response) => {
+  const { field_id, start_time, end_time, total_price, user_ids } = req.body;
+
+  if (!Array.isArray(user_ids) || user_ids.length === 0) {
+    res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
+    return;
+  }
 
   try {
     const connection = await pool.getConnection();
-    // 1. Obtener el tipo de campo
-    const [fieldRows] = await connection.query<RowDataPacket[]>(
-      'SELECT type FROM fields WHERE id = ?',
-      [field_id]
-    );
-    if (fieldRows.length === 0) {
-      connection.release();
-      res.status(404).json({ message: 'Campo no encontrado' });
-      return;
-    }
-    const fieldType = fieldRows[0].type;
-    const maxReservations = fieldType === 'futbol7' ? 14 : 22;
-
-    // 2. Contar reservas activas en ese campo y rango de tiempo
-    const [reservationRows] = await connection.query<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM reservations
-       WHERE field_id = ?
-         AND ((start_time < ? AND end_time > ?) OR (start_time < ? AND end_time > ?) OR (start_time >= ? AND end_time <= ?))`,
-      [field_id, end_time, start_time, start_time, end_time, start_time, end_time]
-    );
-    const currentReservations = reservationRows[0].count;
-    if (currentReservations >= maxReservations) {
-      connection.release();
-      res.status(400).json({ message: `Límite de reservas alcanzado para este campo (${maxReservations})` });
-      return;
-    }
-
-    // 3. Crear la reserva
-    await connection.query(
+    // 1. Crear la reserva
+    const [result] = await connection.query<OkPacket>(
       'INSERT INTO reservations (field_id, start_time, end_time, total_price) VALUES (?, ?, ?, ?)',
       [field_id, start_time, end_time, total_price]
     );
+    const reservationId = result.insertId;
+
+    // 2. Insertar usuarios asociados en la tabla intermedia
+    for (const userId of user_ids) {
+      await connection.query(
+        'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
+        [reservationId, userId]
+      );
+    }
     connection.release();
 
-    console.log(`Reserva creada: Campo ID ${field_id}, Inicio: ${start_time}, Fin: ${end_time}, Precio total: ${total_price}`);
-    res.status(201).json({ message: 'Reserva creada correctamente' });
+    res.status(201).json({ message: 'Reserva creada correctamente', reservationId });
   } catch (error) {
     console.error('Error al crear la reserva:', error);
     res.status(500).json({ message: 'Error al crear la reserva' });
@@ -183,7 +175,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
  *         description: Error al actualizar la reserva
  */
 
-// Ruta para actualizar una reserva existente
+// Ruta para actualizar una reserva existente (solo datos de la reserva, no usuarios)
 router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
   const { field_id, start_time, end_time, total_price } = req.body;
@@ -201,7 +193,6 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
         return res.status(404).json({ message: 'Reserva no encontrada' });
       }
 
-      console.log(`Reserva actualizada: ID ${id}, Campo ID ${field_id}, Inicio: ${start_time}, Fin: ${end_time}, Precio total: ${total_price}`);
       res.json({ message: 'Reserva actualizada correctamente' });
     } catch (error) {
       console.error('Error al actualizar la reserva:', error);
@@ -248,13 +239,12 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
  *       500:
  *         description: Error al actualizar la reserva
  */
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
   const { field_id, start_time, end_time, total_price } = req.body;
 
   try {
     const connection = await pool.getConnection();
-
     const updates: string[] = [];
     const values: any[] = [];
 
@@ -281,7 +271,6 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Pr
     }
 
     values.push(id);
-
     const [result] = await connection.query<OkPacket>(
       `UPDATE reservations SET ${updates.join(', ')} WHERE id = ?`,
       values

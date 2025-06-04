@@ -44,6 +44,15 @@ async function seedDatabase() {
       total_price = VALUES(total_price);
     `);
 
+    // Insertar usuarios asociados a reservas (tabla intermedia)
+    await connection.query(`
+      INSERT INTO reservation_users (reservation_id, user_id) VALUES
+      (1, 1),
+      (1, 2),
+      (2, 2)
+      ON DUPLICATE KEY UPDATE user_id = VALUES(user_id);
+    `);
+
     // Insertar o actualizar datos en la tabla 'payments'
     await connection.query(`
       INSERT INTO payments (id, reservation_id, amount, payment_method, paid_at) VALUES

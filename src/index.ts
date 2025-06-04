@@ -4,6 +4,7 @@ import fieldsRoutes from '../modules/fields/routes/fields.routes';
 import authRoutes from '../modules/auth/routes/auth.routes';
 import usersRoutes from '../modules/users/routes/users.routes';
 import reservationsRoutes from '../modules/reservations/routes/reservations.routes';
+import reservationUsersRouter from '../modules/reservations/routes/reservationUsers.routes';
 import paymentsRoutes from '../modules/payments/routes/payments.routes';
 import { setupSwagger } from '../config/swagger';
 
@@ -39,6 +40,7 @@ app.use('/auth', authRoutes);
 // Registrar las rutas de usuarios, reservas y pagos
 app.use('/api/users', usersRoutes);
 app.use('/api/reservations', reservationsRoutes);
+app.use('/api/reservations', reservationUsersRouter);
 app.use('/api/payments', paymentsRoutes);
 
 app.listen(PORT, () => {

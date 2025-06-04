@@ -72,6 +72,17 @@ async function initializeDatabase() {
         );
       `);
 
+      // Crear tabla 'reservation_users' (relación muchos a muchos)
+      await dbConnection.query(`
+        CREATE TABLE IF NOT EXISTS reservation_users (
+          reservation_id INT NOT NULL,
+          user_id INT NOT NULL,
+          PRIMARY KEY (reservation_id, user_id),
+          FOREIGN KEY (reservation_id) REFERENCES reservations(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+      `);
+
       console.log('Tablas creadas correctamente.');
     } catch (error) {
       console.error('Error al crear las tablas:', error);
