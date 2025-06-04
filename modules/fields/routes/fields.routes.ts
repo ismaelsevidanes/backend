@@ -58,16 +58,20 @@ const router = express.Router();
 router.get('/', async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
-  const { location, max_price, type, least_reserved } = req.query;
+  const { location, max_price, type, least_reserved, search } = req.query;
 
   let baseQuery = 'SELECT f.*, COUNT(r.id) as reservations_count FROM fields f LEFT JOIN reservations r ON f.id = r.field_id';
   let whereClauses: string[] = [];
   let havingClauses: string[] = [];
   let params: any[] = [];
 
+  if (search) {
+    whereClauses.push('LOWER(f.name) LIKE ?');
+    params.push(`%${search.toString().toLowerCase()}%`);
+  }
   if (location) {
-    whereClauses.push('f.location = ?');
-    params.push(location);
+    whereClauses.push('LOWER(f.location) LIKE ?');
+    params.push(`%${location.toString().toLowerCase()}%`);
   }
   if (max_price) {
     whereClauses.push('f.price_per_hour <= ?');

@@ -28,3 +28,5 @@
 - Que se muestren automaticamente los cambios al cambiar de paginacion y de limite de paginacion en el constant
 
 Al hacer el register que directamente se haga login con ese usuario
+
+Porque al hacer login funciona mal tanto con el administrador no funciona teniendo que hacer login con usuario normal y cambiarle el usuario a admin
