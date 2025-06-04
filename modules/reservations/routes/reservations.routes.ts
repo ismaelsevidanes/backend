@@ -1,8 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
+
 
 /**
  * @swagger
@@ -14,7 +16,6 @@ import { RowDataPacket, OkPacket } from 'mysql2';
 const router = express.Router();
 
 // Proteger las rutas de reservas con el middleware de autenticación y blacklist
-import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 router.use(authenticateToken, checkJwtBlacklist);
 
 /**
@@ -96,11 +97,39 @@ router.get('/', async (req: Request, res: Response) => {
  */
 
 // Ruta para crear una nueva reserva
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response): Promise<void> => {
   const { field_id, start_time, end_time, total_price } = req.body;
 
   try {
     const connection = await pool.getConnection();
+    // 1. Obtener el tipo de campo
+    const [fieldRows] = await connection.query<RowDataPacket[]>(
+      'SELECT type FROM fields WHERE id = ?',
+      [field_id]
+    );
+    if (fieldRows.length === 0) {
+      connection.release();
+      res.status(404).json({ message: 'Campo no encontrado' });
+      return;
+    }
+    const fieldType = fieldRows[0].type;
+    const maxReservations = fieldType === 'futbol7' ? 14 : 22;
+
+    // 2. Contar reservas activas en ese campo y rango de tiempo
+    const [reservationRows] = await connection.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as count FROM reservations
+       WHERE field_id = ?
+         AND ((start_time < ? AND end_time > ?) OR (start_time < ? AND end_time > ?) OR (start_time >= ? AND end_time <= ?))`,
+      [field_id, end_time, start_time, start_time, end_time, start_time, end_time]
+    );
+    const currentReservations = reservationRows[0].count;
+    if (currentReservations >= maxReservations) {
+      connection.release();
+      res.status(400).json({ message: `Límite de reservas alcanzado para este campo (${maxReservations})` });
+      return;
+    }
+
+    // 3. Crear la reserva
     await connection.query(
       'INSERT INTO reservations (field_id, start_time, end_time, total_price) VALUES (?, ?, ?, ?)',
       [field_id, start_time, end_time, total_price]

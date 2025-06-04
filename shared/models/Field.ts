@@ -1,6 +1,9 @@
+export type FieldType = 'futbol7' | 'futbol11';
+
 export interface Field {
   id: number;
   name: string;
+  type: FieldType; // 'futbol7' o 'futbol11'
   description?: string;
   address?: string;
   location?: string;

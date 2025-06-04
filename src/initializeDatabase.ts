@@ -34,6 +34,7 @@ async function initializeDatabase() {
         CREATE TABLE IF NOT EXISTS fields (
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(255) NOT NULL,
+          type ENUM('futbol7', 'futbol11') NOT NULL,
           description TEXT,
           address VARCHAR(255),
           location VARCHAR(255),

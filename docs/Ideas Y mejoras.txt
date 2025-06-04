@@ -6,7 +6,7 @@
 
 -Que al obtener el token del usuario (al hacer login) si es un user normal no obtener token por ende no poder hacer las solicitudes a las api
 
--Implementar en el register y solicitud api de register un confirm password
+-Implementar en el register y solicitud api de register un confirm password y en la modificacion del usuario
 
 -Que los modelos de fields, payments y reservations tenga un campo unico (se pueden crear con nombres iguales pero no pueden ser null)
 
@@ -25,5 +25,6 @@
 
 - En el login, que sea nombre de usuario o correo, en el primer input
 
+- Que se muestren automaticamente los cambios al cambiar de paginacion y de limite de paginacion en el constant
 
 Al hacer el register que directamente se haga login con ese usuario
