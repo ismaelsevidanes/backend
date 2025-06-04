@@ -162,17 +162,33 @@ router.post('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PUT reemplazar todos los usuarios de una reserva con validación de máximo
+// PUT reemplazar todos los usuarios de una reserva con validación de máximo y solapamiento de reservas
 router.put('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { user_ids } = req.body;
+    const { user_ids, start_time, end_time, field_id } = req.body;
     if (!Array.isArray(user_ids)) {
       res.status(400).json({ message: 'Debes proporcionar un array de usuarios' });
       return;
     }
     try {
       const connection = await pool.getConnection();
+      // Validar solapamiento de reservas si se actualiza el horario o campo
+      if (start_time && end_time && field_id) {
+        const [overlapRows] = await connection.query<RowDataPacket[]>(
+          `SELECT id FROM reservations WHERE field_id = ? AND id != ? AND (
+            (start_time < ? AND end_time > ?) OR
+            (start_time < ? AND end_time > ?) OR
+            (start_time >= ? AND end_time <= ?)
+          )`,
+          [field_id, reservationId, end_time, end_time, start_time, start_time, start_time, end_time]
+        );
+        if (overlapRows.length > 0) {
+          connection.release();
+          res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
+          return;
+        }
+      }
       // Obtener el tipo de campo de la reserva
       const [fieldRows] = await connection.query<RowDataPacket[]>(
         `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,
@@ -236,13 +252,29 @@ router.put('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo
+// PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo y solapamiento de reservas
 router.patch('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { add_user_ids, remove_user_ids } = req.body;
+    const { add_user_ids, remove_user_ids, start_time, end_time, field_id } = req.body;
     try {
       const connection = await pool.getConnection();
+      // Validar solapamiento de reservas si se actualiza el horario o campo
+      if (start_time && end_time && field_id) {
+        const [overlapRows] = await connection.query<RowDataPacket[]>(
+          `SELECT id FROM reservations WHERE field_id = ? AND id != ? AND (
+            (start_time < ? AND end_time > ?) OR
+            (start_time < ? AND end_time > ?) OR
+            (start_time >= ? AND end_time <= ?)
+          )`,
+          [field_id, reservationId, end_time, end_time, start_time, start_time, start_time, end_time]
+        );
+        if (overlapRows.length > 0) {
+          connection.release();
+          res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
+          return;
+        }
+      }
       // Obtener el tipo de campo de la reserva
       const [fieldRows] = await connection.query<RowDataPacket[]>(
         `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,

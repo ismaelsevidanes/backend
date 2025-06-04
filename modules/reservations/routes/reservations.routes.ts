@@ -123,6 +123,20 @@ router.post('/', async (req: Request, res: Response) => {
       res.status(404).json({ message: 'Campo no encontrado' });
       return;
     }
+    // Validar solapamiento de reservas en el mismo campo y horario
+    const [overlapRows] = await connection.query<RowDataPacket[]>(
+      `SELECT id FROM reservations WHERE field_id = ? AND (
+        (start_time < ? AND end_time > ?) OR
+        (start_time < ? AND end_time > ?) OR
+        (start_time >= ? AND end_time <= ?)
+      )`,
+      [field_id, end_time, end_time, start_time, start_time, start_time, end_time]
+    );
+    if (overlapRows.length > 0) {
+      connection.release();
+      res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
+      return;
+    }
     const fieldType = fieldRows[0].type;
     const maxUsers = fieldType === 'futbol7' ? 14 : 22;
     if (user_ids.length > maxUsers) {
