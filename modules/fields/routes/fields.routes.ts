@@ -109,9 +109,18 @@ router.get('/', async (req: Request, res: Response) => {
       };
     });
 
+    // Obtener el total de campos filtrados para la paginación
+    let countQuery = 'SELECT COUNT(DISTINCT f.id) as total FROM fields f';
+    if (where) countQuery += where;
+    const connection2 = await pool.getConnection();
+    const [countResult] = await connection2.query<RowDataPacket[]>(countQuery, params.slice(0, -2));
+    connection2.release();
+    const total = countResult[0]?.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
+
     res.json({
       data: fieldsWithSpots,
-      totalPages: 1, // Puedes mejorar esto calculando el total filtrado si lo necesitas
+      totalPages,
     });
   } catch (error) {
     console.error('Error al obtener los campos:', error);
