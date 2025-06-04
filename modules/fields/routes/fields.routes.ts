@@ -102,10 +102,19 @@ router.get('/', async (req: Request, res: Response) => {
     // Añadir plazas máximas y disponibles a cada campo
     const fieldsWithSpots = fields.map((field: any) => {
       const max_reservations = field.type === 'futbol7' ? 14 : 22;
+      let images = [];
+      if (field.images) {
+        try {
+          images = typeof field.images === 'string' ? JSON.parse(field.images) : field.images;
+        } catch {
+          images = [];
+        }
+      }
       return {
         ...field,
         max_reservations,
         available_spots: max_reservations - (field.reservations_count || 0),
+        images,
       };
     });
 

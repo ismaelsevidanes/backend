@@ -12,4 +12,5 @@ export interface Field {
   updatedAt: Date;
   users?: User[]; // Relación muchos a muchos con User
   reservations?: Reservation[]; // Relación uno a muchos con Reservation
+  images?: string[]; // Nuevo campo para las rutas de imágenes
 }

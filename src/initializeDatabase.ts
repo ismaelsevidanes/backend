@@ -39,6 +39,7 @@ async function initializeDatabase() {
           address VARCHAR(255),
           location VARCHAR(255),
           price_per_hour DECIMAL(8, 2) NOT NULL,
+          images JSON NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         );
