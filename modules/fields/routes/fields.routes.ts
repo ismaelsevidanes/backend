@@ -137,6 +137,64 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/fields/{id}:
+ *   get:
+ *     summary: Obtiene un campo por su ID
+ *     tags: [Fields]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del campo
+ *     responses:
+ *       200:
+ *         description: Campo encontrado
+ *       404:
+ *         description: Campo no encontrado
+ *       500:
+ *         description: Error al obtener el campo
+ */
+router.get('/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  pool.getConnection()
+    .then(connection => {
+      return connection.query<RowDataPacket[]>(
+        'SELECT * FROM fields WHERE id = ?',
+        [id]
+      ).then(([fields]) => {
+        connection.release();
+        if (!fields || fields.length === 0) {
+          res.status(404).json({ message: 'Campo no encontrado' });
+          return;
+        }
+        let field = fields[0];
+        let images = [];
+        if (field.images) {
+          try {
+            images = typeof field.images === 'string' ? JSON.parse(field.images) : field.images;
+          } catch {
+            images = [];
+          }
+        }
+        const max_reservations = field.type === 'futbol7' ? 14 : 22;
+        res.json({
+          ...field,
+          max_reservations,
+          available_spots: max_reservations, // Si quieres calcular reservas, ajusta aquí
+          images,
+        });
+      });
+    })
+    .catch(error => {
+      console.error('Error al obtener el campo:', error);
+      res.status(500).json({ message: 'Error al obtener el campo' });
+    });
+});
+
 // Proteger todas las rutas siguientes con autenticación y blacklist
 router.use(authenticateToken, checkJwtBlacklist);
 
