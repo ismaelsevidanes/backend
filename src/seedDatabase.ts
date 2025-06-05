@@ -1,8 +1,17 @@
-import pool from '../config/database';
+import 'dotenv/config';
+import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 
 async function seedDatabase() {
-  const connection = await pool.getConnection();
+  // Usa process.env.DB_HOST si está definida, si no, usa 'localhost'
+  const dbHost = process.env.DB_HOST || 'localhost';
+  const connection = await mysql.createConnection({
+    host: dbHost,
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASS || 'root',
+    database: process.env.DB_NAME || 'dreamer',
+    port: 3306,
+  });
   try {
     // Encriptar contraseñas antes de insertar
     const hashedPassword1 = await bcrypt.hash('123password', 10);
@@ -95,8 +104,7 @@ async function seedDatabase() {
   } catch (error) {
     console.error('Error al insertar o actualizar datos iniciales:', error);
   } finally {
-    connection.release();
-    await pool.end();
+    connection.end();
   }
 }
 

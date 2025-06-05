@@ -1,14 +1,18 @@
 import mysql from 'mysql2/promise';
 import pool from '../config/database';
+import 'dotenv/config';
 
 async function initializeDatabase() {
   try {
-    // Crear la base de datos si no existe
+    // Usa process.env.DB_HOST si está definida, si no, usa 'localhost'
+    const dbHost = process.env.DB_HOST || 'localhost';
     const connection = await mysql.createConnection({
-      host: 'localhost',
-      user: 'root',
-      password: 'root',
+      host: dbHost,
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASS || 'root',
+      port: 3306,
     });
+    // Crear la base de datos si no existe
     await connection.query('CREATE DATABASE IF NOT EXISTS dreamer');
     console.log('Base de datos creada o ya existente.');
     await connection.end();

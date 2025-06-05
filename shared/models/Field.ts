@@ -1,3 +1,6 @@
+import type { User } from './User';
+import type { Reservation } from './Reservation';
+
 export type FieldType = 'futbol7' | 'futbol11';
 
 export interface Field {

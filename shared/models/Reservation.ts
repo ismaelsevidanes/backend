@@ -1,3 +1,7 @@
+import type { User } from './User';
+import type { Field } from './Field';
+import type { Payment } from './Payment';
+
 export interface Reservation {
   id: number;
   fieldId: number;

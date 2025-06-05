@@ -1,3 +1,5 @@
+import type { Reservation } from './Reservation';
+
 export interface Payment {
   id: number;
   reservationId: number;
