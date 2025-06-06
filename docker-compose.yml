@@ -33,6 +33,9 @@ services:
       - backend
     ports:
       - "80:80"
+    # Comentar el volumes en caso de desplegarlo mediante Cloudflare
+    volumes:
+      - /etc/letsencrypt/live/pitchdreamers.duckdns.org:/etc/nginx/certs:ro
 
 volumes:
   db_data:
