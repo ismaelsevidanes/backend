@@ -33,10 +33,11 @@ services:
     depends_on:
       - backend
     ports:
-      - "80:80"
+      - "80:80" # Exponer el puerto 80 para HTTP
+      - "443:443" # Exponer el puerto 443 para HTTPS
     # Comentar el volumes en caso de desplegarlo mediante Cloudflare
     volumes:
-      - /etc/letsencrypt/live/pitchdreamers.duckdns.org:/etc/nginx/certs:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     restart: always
 
 volumes:
