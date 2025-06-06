@@ -24,6 +24,7 @@ services:
     command: sh -c "until mysqladmin ping -h db --silent; do sleep 2; done && npx ts-node src/initializeDatabase.ts && npx ts-node src/seedDatabase.ts && npm start"
     volumes:
       - ./public:/app/public
+    restart: always # Reiniciar el contenedor si falla o se detiene las instancias
 
   frontend:
     build:
@@ -36,6 +37,7 @@ services:
     # Comentar el volumes en caso de desplegarlo mediante Cloudflare
     volumes:
       - /etc/letsencrypt/live/pitchdreamers.duckdns.org:/etc/nginx/certs:ro
+    restart: always
 
 volumes:
   db_data:
