@@ -1,27 +1,28 @@
-Berkeley Blue (#003366)
-
+Berkeley Blue (#003366):
 Uso principal: Color base para encabezados, menús de navegación y áreas destacadas como el header o footer.
 Motivo: Este azul oscuro transmite profesionalismo y confianza, ideal para captar la atención en elementos clave.
-Sea Green (#5C9563)
 
+Sea Green (#5C9563):
 Uso secundario: Botones principales, íconos interactivos y enlaces destacados.
 Motivo: Este verde recuerda al césped de un campo de fútbol y añade un toque fresco y dinámico.
-Baby Powder (#F7F7F2)
 
+Baby Powder (#F7F7F2):
 Uso de fondo: Fondo principal de las páginas o secciones con mucho texto, como blog o políticas de privacidad.
 Motivo: Su tono claro crea contraste suave con los colores oscuros, mejorando la legibilidad.
-Beige (#F5F5DC)
 
+Beige (#F5F5DC):
 Uso adicional: Tarjetas de información, secciones destacadas o fondos alternos en formularios.
 Motivo: Añade calidez y equilibra los tonos más fríos de la paleta, aportando sensación de cercanía.
-Air Force Blue (#5A8BB1)
 
+Air Force Blue (#5A8BB1):
 Uso en detalles: Elementos decorativos, bordes de tarjetas o hover en botones.
 Motivo: Este azul claro complementa el Berkeley Blue y refuerza una sensación de armonía en la interfaz.
-Fern Green (#4F7942)
 
+Fern Green (#4F7942):
 Uso para elementos secundarios: Fondos de secciones específicas, etiquetas, barras de progreso o gráficos.
 Motivo: Este tono verde más oscuro proporciona profundidad y conecta visualmente con el tema de los campos de fútbol.
+
+
 Ejemplo de uso:
 Header/Footer: Fondo en Berkeley Blue con texto en Baby Powder.
 Botones primarios: Fondo en Sea Green con texto en Baby Powder.

@@ -1,10 +1,11 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken,AuthenticatedRequest } from '../../../src/middlewares/authMiddleware';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
 import bcrypt from 'bcrypt';
 import { body, validationResult } from 'express-validator';
+import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 
 const router = express.Router();
 
@@ -15,8 +16,8 @@ const router = express.Router();
  *   description: Endpoints relacionados con la gestión de usuarios
  */
 
-// Proteger las rutas de usuarios con el middleware de autenticación
-router.use(authenticateToken);
+// Proteger las rutas de usuarios con el middleware de autenticación y blacklist
+router.use(authenticateToken, checkJwtBlacklist);
 
 /**
  * @swagger
@@ -120,6 +121,125 @@ router.post('/', async (req: Request, res: Response) => {
 
 /**
  * @swagger
+ * /api/users/me:
+ *   get:
+ *     summary: Obtiene la información del usuario autenticado
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Datos del usuario autenticado
+ *       401:
+ *         description: No autorizado
+ */
+// Ruta para obtener el usuario autenticado (igual que el resto de rutas)
+router.get('/me', (req, res, next) => {
+  (async () => {
+    try {
+      // El usuario decodificado está en req.user (agregado por authenticateToken)
+      const userJwt = (req as any).user;
+      if (!userJwt || !userJwt.email) {
+        return res.status(401).json({ message: 'No autorizado' });
+      }
+      const connection = await pool.getConnection();
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id, name, email FROM users WHERE email = ?',
+        [userJwt.email]
+      );
+      connection.release();
+      if (rows.length === 0) {
+        return res.status(404).json({ message: 'Usuario no encontrado' });
+      }
+      res.json(rows[0]);
+    } catch (error) {
+      next(error);
+    }
+  })();
+});
+
+/**
+ * @swagger
+ * /api/users/me:
+ *   patch:
+ *     summary: Actualiza los datos del usuario autenticado
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Usuario actualizado correctamente
+ *       400:
+ *         description: No se proporcionaron campos para actualizar
+ *       401:
+ *         description: No autorizado
+ *       404:
+ *         description: Usuario no encontrado
+ *       500:
+ *         description: Error al actualizar el usuario
+ */
+router.patch('/me', async (req, res, next) => {
+  (async () => {
+    try {
+      const userJwt = (req as any).user;
+      if (!userJwt || !userJwt.email) {
+        return res.status(401).json({ message: 'No autorizado' });
+      }
+      const { name, email, password } = req.body;
+      if (!name && !email && !password) {
+        return res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+      }
+      const connection = await pool.getConnection();
+      const updates: string[] = [];
+      const values: any[] = [];
+      if (name) {
+        updates.push('name = ?');
+        values.push(name);
+      }
+      if (email) {
+        updates.push('email = ?');
+        values.push(email);
+      }
+      if (password) {
+        const bcrypt = require('bcrypt');
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updates.push('password = ?');
+        values.push(hashedPassword);
+      }
+      if (updates.length === 0) {
+        connection.release();
+        return res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+      }
+      // Construir la query y los valores dinámicamente
+      const sql = `UPDATE users SET ${updates.join(', ')} WHERE email = ?`;
+      values.push(userJwt.email);
+      const [result]: any = await connection.query(sql, values);
+      connection.release();
+      if (!result || (typeof result.affectedRows === 'number' && result.affectedRows === 0)) {
+        return res.status(404).json({ message: 'Usuario no encontrado' });
+      }
+      res.json({ message: 'Usuario actualizado correctamente' });
+    } catch (error) {
+      next(error);
+    }
+  })();
+});
+
+/**
+ * @swagger
  * /api/users/{id}:
  *   put:
  *     summary: Actualiza un usuario existente
@@ -183,15 +303,12 @@ router.put(
       // Encriptar la contraseña si se proporciona
       const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
 
-      // Determinar el rol basado en el dominio del correo electrónico
-      const roleFromEmail = email.endsWith('@dreamer.com') ? 'admin' : 'user';
-
-      // Usar el rol proporcionado en el cuerpo de la solicitud o asignar automáticamente
-      const finalRole = role || roleFromEmail;
+      // Usar el rol proporcionado en el cuerpo de la solicitud o mantener el actual si no se envía
+      const finalRole = role || undefined;
 
       const [result] = await connection.query<OkPacket>(
         `UPDATE users 
-         SET name = ?, email = ?, password = COALESCE(?, password), role = ? 
+         SET name = ?, email = ?, password = COALESCE(?, password), role = COALESCE(?, role)
          WHERE id = ?`,
         [name, email, hashedPassword, finalRole, id]
       );
@@ -363,5 +480,6 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
     }
   })().catch(next);
 });
+
 
 export default router;

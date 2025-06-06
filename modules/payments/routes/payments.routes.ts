@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
@@ -13,8 +14,8 @@ const router = express.Router();
  *   description: Endpoints relacionados con la gestión de pagos
  */
 
-// Proteger las rutas de pagos con el middleware de autenticación
-router.use(authenticateToken);
+// Proteger las rutas de pagos con el middleware de autenticación y blacklist
+router.use(authenticateToken, checkJwtBlacklist);
 
 /**
  * @swagger

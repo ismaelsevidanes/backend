@@ -82,8 +82,8 @@ router.post(
 
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Modificar el registro para asignar rol según el dominio del email
-      const role = email.endsWith('@dreamer.com') ? 'admin' : 'user';
+      // Asignar siempre el rol 'user' al registrar
+      const role = 'user';
 
       await connection.query(
         'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
@@ -91,7 +91,7 @@ router.post(
       );
       connection.release();
 
-      console.log(`Usuario registrado: ${name}, Email: ${email}, Rol: ${role}`); // Log para confirmar el registro con rol
+      console.log(`Usuario registrado: ${name}, Email: ${email}, Rol: ${role}`); // Log para confirmar el registro
 
       // Modificar la respuesta del registro para incluir el rol del usuario
       res.status(201).json({ message: 'Usuario registrado correctamente', role });
@@ -169,7 +169,8 @@ router.post(
         return;
       }
 
-      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1h' });
+      // Incluir el nombre y email en el token JWT
+      const token = jwt.sign({ id: user.id, role: user.role, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
 
       console.log(`Usuario logueado: ${email}, Rol: ${user.role}`); // Log para confirmar el inicio de sesión con rol
 
@@ -180,5 +181,42 @@ router.post(
     }
   }
 );
+
+/**
+ * @swagger
+ * /auth/logout:
+ *   post:
+ *     summary: Cierra la sesión del usuario (logout)
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logout exitoso
+ *       401:
+ *         description: Token inválido o expirado
+ */
+
+
+// Importar solo la función para añadir a la blacklist
+import { addTokenToBlacklist } from '../../../src/middlewares/jwtBlacklist';
+
+// Endpoint de logout con blacklist
+router.post('/logout', (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) {
+    res.status(400).json({ message: 'Token no proporcionado' });
+    return;
+  }
+  // Verificar si el token ya está en la blacklist
+  const { jwtBlacklist } = require('../../../src/middlewares/jwtBlacklist');
+  if (jwtBlacklist.has(token)) {
+    res.status(401).json({ message: 'Token inválido o expirado (blacklist)' });
+    return;
+  }
+  addTokenToBlacklist(token);
+  res.status(200).json({ message: 'Logout exitoso (token invalidado)' });
+});
 
 export default router;

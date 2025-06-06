@@ -1,14 +1,18 @@
 import mysql from 'mysql2/promise';
 import pool from '../config/database';
+import 'dotenv/config';
 
 async function initializeDatabase() {
   try {
-    // Crear la base de datos si no existe
+    // Usa process.env.DB_HOST si está definida, si no, usa 'localhost'
+    const dbHost = process.env.DB_HOST || 'localhost';
     const connection = await mysql.createConnection({
-      host: 'localhost',
-      user: 'root',
-      password: 'root',
+      host: dbHost,
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASS || 'root',
+      port: 3306,
     });
+    // Crear la base de datos si no existe
     await connection.query('CREATE DATABASE IF NOT EXISTS dreamer');
     console.log('Base de datos creada o ya existente.');
     await connection.end();
@@ -34,10 +38,12 @@ async function initializeDatabase() {
         CREATE TABLE IF NOT EXISTS fields (
           id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(255) NOT NULL,
+          type ENUM('futbol7', 'futbol11') NOT NULL,
           description TEXT,
           address VARCHAR(255),
           location VARCHAR(255),
           price_per_hour DECIMAL(8, 2) NOT NULL,
+          images JSON NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         );
@@ -68,6 +74,17 @@ async function initializeDatabase() {
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (reservation_id) REFERENCES reservations(id) ON DELETE CASCADE
+        );
+      `);
+
+      // Crear tabla 'reservation_users' (relación muchos a muchos)
+      await dbConnection.query(`
+        CREATE TABLE IF NOT EXISTS reservation_users (
+          reservation_id INT NOT NULL,
+          user_id INT NOT NULL,
+          PRIMARY KEY (reservation_id, user_id),
+          FOREIGN KEY (reservation_id) REFERENCES reservations(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
       `);
 

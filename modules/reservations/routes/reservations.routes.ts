@@ -1,8 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
+
 
 /**
  * @swagger
@@ -13,8 +15,8 @@ import { RowDataPacket, OkPacket } from 'mysql2';
 
 const router = express.Router();
 
-// Proteger las rutas de reservas con el middleware de autenticación
-router.use(authenticateToken);
+// Proteger las rutas de reservas con el middleware de autenticación y blacklist
+router.use(authenticateToken, checkJwtBlacklist);
 
 /**
  * @swagger
@@ -68,7 +70,7 @@ router.get('/', async (req: Request, res: Response) => {
  * @swagger
  * /api/reservations:
  *   post:
- *     summary: Crea una nueva reserva
+ *     summary: Crea una nueva reserva con usuarios asociados
  *     tags: [Reservations]
  *     requestBody:
  *       required: true
@@ -87,27 +89,77 @@ router.get('/', async (req: Request, res: Response) => {
  *                 format: date-time
  *               total_price:
  *                 type: number
+ *               user_ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
  *     responses:
  *       201:
  *         description: Reserva creada correctamente
+ *       400:
+ *         description: Debes proporcionar al menos un usuario para la reserva
  *       500:
  *         description: Error al crear la reserva
  */
 
-// Ruta para crear una nueva reserva
+// Ruta para crear una nueva reserva con usuarios asociados
 router.post('/', async (req: Request, res: Response) => {
-  const { field_id, start_time, end_time, total_price } = req.body;
+  const { field_id, start_time, end_time, total_price, user_ids } = req.body;
+
+  if (!Array.isArray(user_ids) || user_ids.length === 0) {
+    res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
+    return;
+  }
 
   try {
     const connection = await pool.getConnection();
-    await connection.query(
+    // 1. Obtener el tipo de campo
+    const [fieldRows] = await connection.query<RowDataPacket[]>(
+      'SELECT type FROM fields WHERE id = ?',
+      [field_id]
+    );
+    if (fieldRows.length === 0) {
+      connection.release();
+      res.status(404).json({ message: 'Campo no encontrado' });
+      return;
+    }
+    // Validar solapamiento de reservas en el mismo campo y horario
+    const [overlapRows] = await connection.query<RowDataPacket[]>(
+      `SELECT id FROM reservations WHERE field_id = ? AND (
+        (start_time < ? AND end_time > ?) OR
+        (start_time < ? AND end_time > ?) OR
+        (start_time >= ? AND end_time <= ?)
+      )`,
+      [field_id, end_time, end_time, start_time, start_time, start_time, end_time]
+    );
+    if (overlapRows.length > 0) {
+      connection.release();
+      res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
+      return;
+    }
+    const fieldType = fieldRows[0].type;
+    const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+    if (user_ids.length > maxUsers) {
+      connection.release();
+      res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+      return;
+    }
+    // 2. Crear la reserva
+    const [result] = await connection.query<OkPacket>(
       'INSERT INTO reservations (field_id, start_time, end_time, total_price) VALUES (?, ?, ?, ?)',
       [field_id, start_time, end_time, total_price]
     );
+    const reservationId = result.insertId;
+    // 3. Insertar usuarios asociados en la tabla intermedia
+    for (const userId of user_ids) {
+      await connection.query(
+        'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
+        [reservationId, userId]
+      );
+    }
     connection.release();
 
-    console.log(`Reserva creada: Campo ID ${field_id}, Inicio: ${start_time}, Fin: ${end_time}, Precio total: ${total_price}`);
-    res.status(201).json({ message: 'Reserva creada correctamente' });
+    res.status(201).json({ message: 'Reserva creada correctamente', reservationId });
   } catch (error) {
     console.error('Error al crear la reserva:', error);
     res.status(500).json({ message: 'Error al crear la reserva' });
@@ -153,7 +205,7 @@ router.post('/', async (req: Request, res: Response) => {
  *         description: Error al actualizar la reserva
  */
 
-// Ruta para actualizar una reserva existente
+// Ruta para actualizar una reserva existente (solo datos de la reserva, no usuarios)
 router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
   const { field_id, start_time, end_time, total_price } = req.body;
@@ -171,7 +223,6 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
         return res.status(404).json({ message: 'Reserva no encontrada' });
       }
 
-      console.log(`Reserva actualizada: ID ${id}, Campo ID ${field_id}, Inicio: ${start_time}, Fin: ${end_time}, Precio total: ${total_price}`);
       res.json({ message: 'Reserva actualizada correctamente' });
     } catch (error) {
       console.error('Error al actualizar la reserva:', error);
@@ -218,13 +269,12 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
  *       500:
  *         description: Error al actualizar la reserva
  */
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
   const { field_id, start_time, end_time, total_price } = req.body;
 
   try {
     const connection = await pool.getConnection();
-
     const updates: string[] = [];
     const values: any[] = [];
 
@@ -251,7 +301,6 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Pr
     }
 
     values.push(id);
-
     const [result] = await connection.query<OkPacket>(
       `UPDATE reservations SET ${updates.join(', ')} WHERE id = ?`,
       values

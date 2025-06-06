@@ -1,3 +1,6 @@
+import type { Field } from './Field';
+import type { Reservation } from './Reservation';
+
 export interface User {
   id: number;
   name: string;
