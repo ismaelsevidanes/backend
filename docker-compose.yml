@@ -1,0 +1,38 @@
+services:
+  db:
+    image: mysql:8
+    restart: always
+    environment:
+      MYSQL_DATABASE: dreamer
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3308:3306" # Expose MySQL on port 3308 en uno que este libre
+    volumes:
+      - db_data:/var/lib/mysql
+
+  backend:
+    build: .
+    environment:
+      DB_HOST: db
+      DB_USER: root
+      DB_PASS: root
+      DB_NAME: dreamer
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    command: sh -c "until mysqladmin ping -h db --silent; do sleep 2; done && npx ts-node src/initializeDatabase.ts && npx ts-node src/seedDatabase.ts && npm start"
+    volumes:
+      - ./public:/app/public
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  db_data:
