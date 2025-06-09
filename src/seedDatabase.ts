@@ -69,13 +69,15 @@ async function seedDatabase() {
 
     // Insertar o actualizar datos en la tabla 'reservations'
     await connection.query(`
-      INSERT INTO reservations (id, field_id, start_time, end_time, total_price) VALUES
-      (1, 1, '2025-05-03 10:00:00', '2025-05-03 12:00:00', 100.00),
-      (2, 2, '2025-05-04 15:00:00', '2025-05-04 17:00:00', 80.00)
+      INSERT INTO reservations (id, field_id, start_time, end_time, date, slot, total_price) VALUES
+      (1, 1, '2025-05-03 09:00:00', '2025-05-03 10:30:00', '2025-05-03', 1, 100.00),
+      (2, 2, '2025-05-04 10:30:00', '2025-05-04 12:00:00', '2025-05-04', 2, 80.00)
       ON DUPLICATE KEY UPDATE
       field_id = VALUES(field_id),
       start_time = VALUES(start_time),
       end_time = VALUES(end_time),
+      date = VALUES(date),
+      slot = VALUES(slot),
       total_price = VALUES(total_price);
     `);
 

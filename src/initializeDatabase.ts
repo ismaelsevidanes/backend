@@ -49,13 +49,15 @@ async function initializeDatabase() {
         );
       `);
 
-      // Crear tabla 'reservations'
+      // Crear tabla 'reservations' con campos date y slot
       await dbConnection.query(`
         CREATE TABLE IF NOT EXISTS reservations (
           id INT AUTO_INCREMENT PRIMARY KEY,
           field_id INT NOT NULL,
           start_time TIMESTAMP NOT NULL,
           end_time TIMESTAMP NOT NULL,
+          date DATE NOT NULL,
+          slot TINYINT NOT NULL,
           total_price DECIMAL(8, 2) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

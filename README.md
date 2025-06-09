@@ -60,16 +60,14 @@ Este proyecto corresponde al backend de Pitch Dreamers, desarrollado con TypeScr
    npm run dev
    ```
 
+## Cambio de modo desarrollo y modo produccion(despliegue)
+1. En el fichero backend/config/swagger.ts alternar el comentario entre estas lineas
+   ```bash
+   url: 'http://localhost:3000', // Cambiar esto si se usa otro puerto
+   //url: 'https://pitchdreamers.duckdns.org', // URL de producción 
+   ```
 ## Despliegue
-1. Compila el proyecto:
-   ```bash
-   npm run build
-   ```
-2. Inicia el servidor en producción:
-   ```bash
-   npm start
-   ```
-3. Sirve los archivos estáticos generados en la carpeta `dist` con un servidor como `serve` o `nginx`.
+1. 
 
 ---
 

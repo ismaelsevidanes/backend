@@ -81,7 +81,7 @@ router.get('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al añadir usuarios a la reserva
  */
-// POST añadir usuarios a una reserva con validación de máximo según tipo de campo
+// POST añadir usuarios a una reserva con validación de máximo según tipo de campo, día y slot
 router.post('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
@@ -92,27 +92,47 @@ router.post('/:reservationId/users', (req, res, next) => {
     }
     try {
       const connection = await pool.getConnection();
-      // Obtener el tipo de campo de la reserva
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
         [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
+        return;
+      }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
       );
       if (fieldRows.length === 0) {
         connection.release();
-        res.status(404).json({ message: 'Reserva o campo no encontrado' });
+        res.status(404).json({ message: 'Campo no encontrado' });
         return;
       }
       const fieldType = fieldRows[0].type;
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // Contar usuarios actuales
+      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(ru.user_id) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar usuarios actuales de ESTA reserva
       const [currentUsersRows] = await connection.query<RowDataPacket[]>(
         'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
         [reservationId]
       );
       const currentCount = currentUsersRows[0].count;
-      if (currentCount + user_ids.length > maxUsers) {
+      // Si sumamos los nuevos usuarios, ¿superamos el máximo?
+      if (currentUsers - currentCount + user_ids.length > maxUsers) {
         connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
         return;
       }
       for (const userId of user_ids) {
@@ -162,48 +182,58 @@ router.post('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PUT reemplazar todos los usuarios de una reserva con validación de máximo y solapamiento de reservas
+// PUT reemplazar todos los usuarios de una reserva con validación de máximo por campo, día y slot
 router.put('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { user_ids, start_time, end_time, field_id } = req.body;
+    const { user_ids } = req.body;
     if (!Array.isArray(user_ids)) {
       res.status(400).json({ message: 'Debes proporcionar un array de usuarios' });
       return;
     }
     try {
       const connection = await pool.getConnection();
-      // Validar solapamiento de reservas si se actualiza el horario o campo
-      if (start_time && end_time && field_id) {
-        const [overlapRows] = await connection.query<RowDataPacket[]>(
-          `SELECT id FROM reservations WHERE field_id = ? AND id != ? AND (
-            (start_time < ? AND end_time > ?) OR
-            (start_time < ? AND end_time > ?) OR
-            (start_time >= ? AND end_time <= ?)
-          )`,
-          [field_id, reservationId, end_time, end_time, start_time, start_time, start_time, end_time]
-        );
-        if (overlapRows.length > 0) {
-          connection.release();
-          res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
-          return;
-        }
-      }
-      // Obtener el tipo de campo de la reserva
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
         [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
+        return;
+      }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
       );
       if (fieldRows.length === 0) {
         connection.release();
-        res.status(404).json({ message: 'Reserva o campo no encontrado' });
+        res.status(404).json({ message: 'Campo no encontrado' });
         return;
       }
       const fieldType = fieldRows[0].type;
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      if (user_ids.length > maxUsers) {
+      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(ru.user_id) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar usuarios actuales de ESTA reserva
+      const [currentUsersRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
+        [reservationId]
+      );
+      const currentCount = currentUsersRows[0].count;
+      // Si sumamos los nuevos usuarios, ¿superamos el máximo?
+      if (currentUsers - currentCount + user_ids.length > maxUsers) {
         connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
         return;
       }
       await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [reservationId]);
@@ -252,42 +282,45 @@ router.put('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo y solapamiento de reservas
+// PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo por campo, día y slot
 router.patch('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { add_user_ids, remove_user_ids, start_time, end_time, field_id } = req.body;
+    const { add_user_ids, remove_user_ids } = req.body;
     try {
       const connection = await pool.getConnection();
-      // Validar solapamiento de reservas si se actualiza el horario o campo
-      if (start_time && end_time && field_id) {
-        const [overlapRows] = await connection.query<RowDataPacket[]>(
-          `SELECT id FROM reservations WHERE field_id = ? AND id != ? AND (
-            (start_time < ? AND end_time > ?) OR
-            (start_time < ? AND end_time > ?) OR
-            (start_time >= ? AND end_time <= ?)
-          )`,
-          [field_id, reservationId, end_time, end_time, start_time, start_time, start_time, end_time]
-        );
-        if (overlapRows.length > 0) {
-          connection.release();
-          res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
-          return;
-        }
-      }
-      // Obtener el tipo de campo de la reserva
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
         [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
+        return;
+      }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
       );
       if (fieldRows.length === 0) {
         connection.release();
-        res.status(404).json({ message: 'Reserva o campo no encontrado' });
+        res.status(404).json({ message: 'Campo no encontrado' });
         return;
       }
       const fieldType = fieldRows[0].type;
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // Contar usuarios actuales
+      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(ru.user_id) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar usuarios actuales de ESTA reserva
       const [currentUsersRows] = await connection.query<RowDataPacket[]>(
         'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
         [reservationId]
@@ -296,9 +329,9 @@ router.patch('/:reservationId/users', (req, res, next) => {
       let newCount = currentCount;
       if (Array.isArray(add_user_ids)) newCount += add_user_ids.length;
       if (Array.isArray(remove_user_ids)) newCount -= remove_user_ids.length;
-      if (newCount > maxUsers) {
+      if (currentUsers - currentCount + newCount > maxUsers) {
         connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
         return;
       }
       if (Array.isArray(add_user_ids)) {
