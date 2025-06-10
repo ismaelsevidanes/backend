@@ -79,11 +79,12 @@ async function initializeDatabase() {
         );
       `);
 
-      // Crear tabla 'reservation_users' (relación muchos a muchos)
+      // Crear tabla 'reservation_users' (relación muchos a muchos, con cantidad de plazas)
       await dbConnection.query(`
         CREATE TABLE IF NOT EXISTS reservation_users (
           reservation_id INT NOT NULL,
           user_id INT NOT NULL,
+          quantity INT NOT NULL DEFAULT 1,
           PRIMARY KEY (reservation_id, user_id),
           FOREIGN KEY (reservation_id) REFERENCES reservations(id) ON DELETE CASCADE,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE

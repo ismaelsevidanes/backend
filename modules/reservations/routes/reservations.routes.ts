@@ -100,7 +100,7 @@ function isWeekend(dateStr: string) {
  * @swagger
  * /api/reservations:
  *   post:
- *     summary: Crea una nueva reserva con usuarios asociados
+ *     summary: Crea una nueva reserva con usuarios asociados (soporta cantidad de plazas)
  *     tags: [Reservations]
  *     requestBody:
  *       required: true
@@ -124,6 +124,11 @@ function isWeekend(dateStr: string) {
  *                 type: array
  *                 items:
  *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       201:
  *         description: Reserva creada correctamente
@@ -135,7 +140,7 @@ function isWeekend(dateStr: string) {
 
 // Nueva ruta para crear una reserva con slots y validación de usuarios máximos
 router.post('/', async (req: Request, res: Response) => {
-  const { field_id, date, slot, total_price, user_ids } = req.body;
+  const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
 
   if (!Array.isArray(user_ids) || user_ids.length === 0) {
     res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
@@ -172,39 +177,47 @@ router.post('/', async (req: Request, res: Response) => {
     }
     const fieldType = fieldRows[0].type;
     const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-    // 2. Contar usuarios ya reservados para ese campo, fecha y slot
+    // 2. Contar plazas ya reservadas para ese campo, fecha y slot
     const [userCountRows] = await connection.query<RowDataPacket[]>(
-      `SELECT COUNT(ru.user_id) as count FROM reservations r
+      `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
         JOIN reservation_users ru ON ru.reservation_id = r.id
         WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ?`,
       [field_id, date, start_time]
     );
     const currentUsers = userCountRows[0]?.count || 0;
-    if (typeof maxUsers !== 'number') {
+    // 3. Calcular plazas a reservar (usando quantities correctamente)
+    let plazasNuevas = 0;
+    const userCountMap: Record<number, number> = {};
+    for (let i = 0; i < user_ids.length; i++) {
+      const userId = user_ids[i];
+      let quantity = 1;
+      if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+        quantity = Number(quantities[i]);
+      }
+      userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
+      plazasNuevas += quantity;
+    }
+    if (currentUsers + plazasNuevas > maxUsers) {
       connection.release();
-      res.status(500).json({ message: 'No se pudo determinar el máximo de usuarios para este campo.' });
+      res.status(400).json({ message: `El máximo de plazas para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
       return;
     }
-    if (currentUsers + user_ids.length > maxUsers) {
-      connection.release();
-      res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
-      return;
-    }
-    // 3. Crear la reserva
+    // 4. Crear la reserva (agrupada: una reserva con N plazas para ese usuario)
     const [result] = await connection.query<OkPacket>(
-      'INSERT INTO reservations (field_id, start_time, end_time, total_price) VALUES (?, ?, ?, ?)',
-      [field_id, start_time, end_time, total_price]
+      'INSERT INTO reservations (field_id, start_time, end_time, date, slot, total_price) VALUES (?, ?, ?, ?, ?, ?)',
+      [field_id, start_time, end_time, date, slot, total_price]
     );
     const reservationId = result.insertId;
-    // 4. Insertar usuarios asociados en la tabla intermedia
-    for (const userId of user_ids) {
+    // 5. Insertar usuarios asociados en la tabla intermedia (con cantidad de plazas)
+    for (const userId of Object.keys(userCountMap)) {
+      // Siempre insertar, nunca sumar, porque cada reserva es única (no debe haber duplicados para reservation_id)
       await connection.query(
-        'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-        [reservationId, userId]
+        'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
+        [reservationId, userId, userCountMap[Number(userId)]]
       );
     }
     connection.release();
-    res.status(201).json({ message: 'Reserva creada correctamente', reservationId });
+    res.status(201).json({ message: 'Reserva creada correctamente', reservationId, plazasDisponibles: maxUsers - (currentUsers + plazasNuevas), maxUsers });
   } catch (error) {
     console.error('Error al crear la reserva:', error);
     res.status(500).json({ message: 'Error al crear la reserva' });
@@ -215,7 +228,7 @@ router.post('/', async (req: Request, res: Response) => {
  * @swagger
  * /api/reservations/{id}:
  *   put:
- *     summary: Actualiza una reserva existente
+ *     summary: Actualiza una reserva existente (soporta cantidad de plazas)
  *     tags: [Reservations]
  *     parameters:
  *       - in: path
@@ -246,6 +259,11 @@ router.post('/', async (req: Request, res: Response) => {
  *                 type: array
  *                 items:
  *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       200:
  *         description: Reserva actualizada correctamente
@@ -259,7 +277,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
   (async () => {
     const { id } = req.params;
-    const { field_id, date, slot, total_price, user_ids } = req.body;
+    const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
 
     if (!date || !slot) {
       res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
@@ -295,18 +313,26 @@ router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
       let currentUsers = 0;
       if (Array.isArray(user_ids)) {
         const [userCountRows] = await connection.query<RowDataPacket[]>(
-          `SELECT COUNT(ru.user_id) as count FROM reservations r
+          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
             JOIN reservation_users ru ON ru.reservation_id = r.id
             WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
           [field_id, date, start_time, id]
         );
         currentUsers = userCountRows[0]?.count || 0;
-        if (typeof maxUsers !== 'number') {
-          connection.release();
-          res.status(500).json({ message: 'No se pudo determinar el máximo de usuarios para este campo.' });
-          return;
+        // Calcular plazas a reservar
+        let plazasNuevas = 0;
+        const userCountMap: Record<number, number> = {};
+        for (let i = 0; i < user_ids.length; i++) {
+          const userId = user_ids[i];
+          // Usar quantities del body, si existe, si no por defecto 1
+          let quantity = 1;
+          if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+            quantity = Number(quantities[i]);
+          }
+          userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
+          plazasNuevas += quantity;
         }
-        if (currentUsers + user_ids.length > maxUsers) {
+        if (currentUsers + plazasNuevas > maxUsers) {
           connection.release();
           res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
           return;
@@ -425,7 +451,7 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
     // Validar usuarios si se pasan y se actualiza fecha/slot/campo
     if (Array.isArray(user_ids) && (date && slot && field_id)) {
       const [userCountRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(ru.user_id) as count FROM reservations r
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
           JOIN reservation_users ru ON ru.reservation_id = r.id
           WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
         [field_id, date, start_time, id]

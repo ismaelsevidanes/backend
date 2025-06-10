@@ -27,4 +27,4 @@
 
 - Que se muestren automaticamente los cambios al cambiar de paginacion y de limite de paginacion en el constant
 
-Al hacer el register que directamente se haga login con ese usuario
+Al hacer el register que directamente se haga login con ese usuario y te redireccione a donde estabas como en el login

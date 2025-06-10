@@ -2,4 +2,5 @@
 export interface ReservationUser {
   reservationId: number;
   userId: number;
+  quantity: number;
 }

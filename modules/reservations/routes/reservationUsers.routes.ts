@@ -13,7 +13,7 @@ router.use(authenticateToken, checkJwtBlacklist);
  * @swagger
  * /api/reservations/{reservationId}/users:
  *   get:
- *     summary: Obtiene los usuarios asociados a una reserva
+ *     summary: Obtiene los usuarios asociados a una reserva (incluye cantidad de plazas)
  *     tags: [Reservations]
  *     parameters:
  *       - in: path
@@ -24,18 +24,33 @@ router.use(authenticateToken, checkJwtBlacklist);
  *         description: ID de la reserva
  *     responses:
  *       200:
- *         description: Lista de usuarios asociados a la reserva
+ *         description: Lista de usuarios asociados a la reserva y su cantidad de plazas
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   name:
+ *                     type: string
+ *                   email:
+ *                     type: string
+ *                   quantity:
+ *                     type: integer
  *       500:
  *         description: Error al obtener los usuarios de la reserva
  */
-// GET usuarios de una reserva
+// GET usuarios de una reserva (ahora incluye quantity)
 router.get('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
     try {
       const connection = await pool.getConnection();
       const [users] = await connection.query<RowDataPacket[]>(
-        `SELECT u.id, u.name, u.email FROM users u
+        `SELECT u.id, u.name, u.email, ru.quantity FROM users u
          INNER JOIN reservation_users ru ON ru.user_id = u.id
          WHERE ru.reservation_id = ?`,
         [reservationId]
@@ -53,7 +68,7 @@ router.get('/:reservationId/users', (req, res, next) => {
  * @swagger
  * /api/reservations/{reservationId}/users:
  *   post:
- *     summary: Añade uno o varios usuarios a una reserva existente
+ *     summary: Añade uno o varios usuarios a una reserva existente (soporta cantidad de plazas)
  *     tags: [Reservations]
  *     parameters:
  *       - in: path
@@ -73,6 +88,11 @@ router.get('/:reservationId/users', (req, res, next) => {
  *                 type: array
  *                 items:
  *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       200:
  *         description: Usuarios añadidos a la reserva
@@ -81,11 +101,11 @@ router.get('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al añadir usuarios a la reserva
  */
-// POST añadir usuarios a una reserva con validación de máximo según tipo de campo, día y slot
+// POST añadir usuarios a una reserva (ahora soporta quantity)
 router.post('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { user_ids } = req.body;
+    const { user_ids, quantities } = req.body;
     if (!Array.isArray(user_ids) || user_ids.length === 0) {
       res.status(400).json({ message: 'Debes proporcionar al menos un usuario' });
       return;
@@ -135,10 +155,13 @@ router.post('/:reservationId/users', (req, res, next) => {
         res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
         return;
       }
-      for (const userId of user_ids) {
+      // Añadir usuarios con quantity
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
         await connection.query(
-          'INSERT IGNORE INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-          [reservationId, userId]
+          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)',
+          [reservationId, userId, quantity]
         );
       }
       connection.release();
@@ -154,7 +177,7 @@ router.post('/:reservationId/users', (req, res, next) => {
  * @swagger
  * /api/reservations/{reservationId}/users:
  *   put:
- *     summary: Reemplaza todos los usuarios de una reserva
+ *     summary: Reemplaza todos los usuarios de una reserva (soporta cantidad de plazas)
  *     tags: [Reservations]
  *     parameters:
  *       - in: path
@@ -174,6 +197,11 @@ router.post('/:reservationId/users', (req, res, next) => {
  *                 type: array
  *                 items:
  *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       200:
  *         description: Usuarios de la reserva actualizados
@@ -182,11 +210,11 @@ router.post('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PUT reemplazar todos los usuarios de una reserva con validación de máximo por campo, día y slot
+// PUT reemplazar todos los usuarios de una reserva (soporta quantity)
 router.put('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { user_ids } = req.body;
+    const { user_ids, quantities } = req.body;
     if (!Array.isArray(user_ids)) {
       res.status(400).json({ message: 'Debes proporcionar un array de usuarios' });
       return;
@@ -216,31 +244,38 @@ router.put('/:reservationId/users', (req, res, next) => {
       }
       const fieldType = fieldRows[0].type;
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      // Contar plazas ya reservadas en ese campo, día y slot (todas las reservas)
       const [userCountRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(ru.user_id) as count FROM reservations r
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
           JOIN reservation_users ru ON ru.reservation_id = r.id
           WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
         [field_id, date, slot]
       );
       const currentUsers = userCountRows[0]?.count || 0;
-      // Contar usuarios actuales de ESTA reserva
+      // Contar plazas actuales de ESTA reserva
       const [currentUsersRows] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
+        'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
         [reservationId]
       );
       const currentCount = currentUsersRows[0].count;
-      // Si sumamos los nuevos usuarios, ¿superamos el máximo?
-      if (currentUsers - currentCount + user_ids.length > maxUsers) {
+      // Calcular plazas a añadir
+      let plazasNuevas = 0;
+      for (let i = 0; i < user_ids.length; i++) {
+        plazasNuevas += Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
+      }
+      // Si sumamos las nuevas plazas, ¿superamos el máximo?
+      if (currentUsers - currentCount + plazasNuevas > maxUsers) {
         connection.release();
         res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
         return;
       }
       await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [reservationId]);
-      for (const userId of user_ids) {
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
         await connection.query(
-          'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-          [reservationId, userId]
+          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
+          [reservationId, userId, quantity]
         );
       }
       connection.release();
