@@ -60,7 +60,10 @@ router.get('/', async (req: Request, res: Response) => {
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
   const { location, max_price, type, least_reserved, search } = req.query;
 
-  let baseQuery = 'SELECT f.*, COUNT(r.id) as reservations_count FROM fields f LEFT JOIN reservations r ON f.id = r.field_id';
+  let baseQuery = `SELECT f.*, COALESCE(SUM(ru.quantity),0) as reserved_spots
+    FROM fields f
+    LEFT JOIN reservations r ON f.id = r.field_id AND r.start_time >= CURDATE()
+    LEFT JOIN reservation_users ru ON ru.reservation_id = r.id`;
   let whereClauses: string[] = [];
   let havingClauses: string[] = [];
   let params: any[] = [];
@@ -113,7 +116,7 @@ router.get('/', async (req: Request, res: Response) => {
       return {
         ...field,
         max_reservations,
-        available_spots: max_reservations - (field.reservations_count || 0),
+        available_spots: Math.max(0, max_reservations - (field.reserved_spots || 0)),
         images,
       };
     });
@@ -158,41 +161,50 @@ router.get('/', async (req: Request, res: Response) => {
  *       500:
  *         description: Error al obtener el campo
  */
-router.get('/:id', (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  pool.getConnection()
-    .then(connection => {
-      return connection.query<RowDataPacket[]>(
-        'SELECT * FROM fields WHERE id = ?',
-        [id]
-      ).then(([fields]) => {
-        connection.release();
-        if (!fields || fields.length === 0) {
-          res.status(404).json({ message: 'Campo no encontrado' });
-          return;
-        }
-        let field = fields[0];
-        let images = [];
-        if (field.images) {
-          try {
-            images = typeof field.images === 'string' ? JSON.parse(field.images) : field.images;
-          } catch {
-            images = [];
-          }
-        }
-        const max_reservations = field.type === 'futbol7' ? 14 : 22;
-        res.json({
-          ...field,
-          max_reservations,
-          available_spots: max_reservations, // Si quieres calcular reservas, ajusta aquí
-          images,
-        });
-      });
-    })
-    .catch(error => {
-      console.error('Error al obtener el campo:', error);
-      res.status(500).json({ message: 'Error al obtener el campo' });
+  try {
+    const connection = await pool.getConnection();
+    // Obtener campo
+    const [fields] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM fields WHERE id = ?',
+      [id]
+    );
+    if (!fields || fields.length === 0) {
+      connection.release();
+      res.status(404).json({ message: 'Campo no encontrado' });
+      return;
+    }
+    let field = fields[0];
+    let images = [];
+    if (field.images) {
+      try {
+        images = typeof field.images === 'string' ? JSON.parse(field.images) : field.images;
+      } catch {
+        images = [];
+      }
+    }
+    const max_reservations = field.type === 'futbol7' ? 14 : 22;
+    // Calcular plazas reservadas para el campo (todas las reservas futuras)
+    const [reservedRows] = await connection.query<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(ru.quantity),0) as reserved
+       FROM reservations r
+       JOIN reservation_users ru ON ru.reservation_id = r.id
+       WHERE r.field_id = ? AND r.start_time >= CURDATE()`,
+      [id]
+    );
+    const reserved = reservedRows[0]?.reserved || 0;
+    connection.release();
+    res.json({
+      ...field,
+      max_reservations,
+      available_spots: Math.max(0, max_reservations - reserved),
+      images,
     });
+  } catch (error) {
+    console.error('Error al obtener el campo:', error);
+    res.status(500).json({ message: 'Error al obtener el campo' });
+  }
 });
 
 // Proteger todas las rutas siguientes con autenticación y blacklist

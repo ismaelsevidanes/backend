@@ -177,14 +177,14 @@ router.post('/', async (req: Request, res: Response) => {
     }
     const fieldType = fieldRows[0].type;
     const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-    // 2. Contar plazas ya reservadas para ese campo, fecha y slot
+    // 2. Contar plazas ya reservadas para ese campo, fecha y slot (de todas las reservas en ese slot)
     const [userCountRows] = await connection.query<RowDataPacket[]>(
       `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
         JOIN reservation_users ru ON ru.reservation_id = r.id
-        WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ?`,
-      [field_id, date, start_time]
+        WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.slot = ?`,
+      [field_id, date, slot]
     );
-    const currentUsers = userCountRows[0]?.count || 0;
+    const currentUsers = Number(userCountRows[0]?.count) || 0;
     // 3. Calcular plazas a reservar (usando quantities correctamente)
     let plazasNuevas = 0;
     const userCountMap: Record<number, number> = {};
@@ -197,9 +197,17 @@ router.post('/', async (req: Request, res: Response) => {
       userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
       plazasNuevas += quantity;
     }
+    // DEBUG: log para comprobar cantidades
+    console.log('currentUsers:', currentUsers, 'plazasNuevas:', plazasNuevas, 'maxUsers:', maxUsers);
     if (currentUsers + plazasNuevas > maxUsers) {
       connection.release();
-      res.status(400).json({ message: `El máximo de plazas para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+      res.status(400).json({
+        message: `El máximo de plazas para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${Math.max(0, maxUsers - currentUsers)}. Intentas reservar: ${plazasNuevas}. Ya reservadas: ${currentUsers}.`,
+        maxUsers,
+        plazasDisponibles: Math.max(0, maxUsers - currentUsers),
+        plazasSolicitadas: plazasNuevas,
+        plazasReservadas: currentUsers
+      });
       return;
     }
     // 4. Crear la reserva (agrupada: una reserva con N plazas para ese usuario)
@@ -209,15 +217,31 @@ router.post('/', async (req: Request, res: Response) => {
     );
     const reservationId = result.insertId;
     // 5. Insertar usuarios asociados en la tabla intermedia (con cantidad de plazas)
-    for (const userId of Object.keys(userCountMap)) {
-      // Siempre insertar, nunca sumar, porque cada reserva es única (no debe haber duplicados para reservation_id)
+    // Debe haber solo una fila por usuario por reserva, con la cantidad total
+    const userQuantityMap: Record<number, number> = {};
+    for (let i = 0; i < user_ids.length; i++) {
+      const userId = user_ids[i];
+      let quantity = 1;
+      if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+        quantity = Number(quantities[i]);
+      }
+      userQuantityMap[userId] = (userQuantityMap[userId] || 0) + quantity;
+    }
+    for (const userIdStr of Object.keys(userQuantityMap)) {
+      const userId = Number(userIdStr);
       await connection.query(
         'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
-        [reservationId, userId, userCountMap[Number(userId)]]
+        [reservationId, userId, userQuantityMap[userId]]
       );
     }
     connection.release();
-    res.status(201).json({ message: 'Reserva creada correctamente', reservationId, plazasDisponibles: maxUsers - (currentUsers + plazasNuevas), maxUsers });
+    res.status(201).json({
+      message: 'Reserva creada correctamente',
+      reservationId,
+      plazasDisponibles: maxUsers - (currentUsers + plazasNuevas),
+      maxUsers,
+      plazasReservadas: currentUsers + plazasNuevas
+    });
   } catch (error) {
     console.error('Error al crear la reserva:', error);
     res.status(500).json({ message: 'Error al crear la reserva' });

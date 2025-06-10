@@ -27,4 +27,6 @@
 
 - Que se muestren automaticamente los cambios al cambiar de paginacion y de limite de paginacion en el constant
 
+Crear una vista y funcionalidad para ver las reservas que tiene ese usuario
+
 Al hacer el register que directamente se haga login con ese usuario y te redireccione a donde estabas como en el login
