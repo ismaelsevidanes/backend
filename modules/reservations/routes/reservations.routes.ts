@@ -140,7 +140,7 @@ function isWeekend(dateStr: string) {
 
 // Nueva ruta para crear una reserva con slots y validación de usuarios máximos
 router.post('/', async (req: Request, res: Response) => {
-  const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
+  const { field_id, date, slot, user_ids, quantities } = req.body;
 
   if (!Array.isArray(user_ids) || user_ids.length === 0) {
     res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
@@ -165,9 +165,9 @@ router.post('/', async (req: Request, res: Response) => {
 
   try {
     const connection = await pool.getConnection();
-    // 1. Obtener el tipo de campo
+    // 1. Obtener el tipo de campo y el precio
     const [fieldRows] = await connection.query<RowDataPacket[]>(
-      'SELECT type FROM fields WHERE id = ?',
+      'SELECT type, price_per_hour FROM fields WHERE id = ?',
       [field_id]
     );
     if (fieldRows.length === 0) {
@@ -176,6 +176,7 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
     const fieldType = fieldRows[0].type;
+    const pricePerHour = Number(fieldRows[0].price_per_hour);
     const maxUsers = fieldType === 'futbol7' ? 14 : 22;
     // 2. Contar plazas ya reservadas para ese campo, fecha y slot (de todas las reservas en ese slot)
     const [userCountRows] = await connection.query<RowDataPacket[]>(
@@ -197,8 +198,10 @@ router.post('/', async (req: Request, res: Response) => {
       userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
       plazasNuevas += quantity;
     }
+    // Calcular el precio total según plazas reservadas y precio del campo
+    const total_price = plazasNuevas * pricePerHour;
     // DEBUG: log para comprobar cantidades
-    console.log('currentUsers:', currentUsers, 'plazasNuevas:', plazasNuevas, 'maxUsers:', maxUsers);
+    //console.log('currentUsers:', currentUsers, 'plazasNuevas:', plazasNuevas, 'maxUsers:', maxUsers);
     if (currentUsers + plazasNuevas > maxUsers) {
       connection.release();
       res.status(400).json({
