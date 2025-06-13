@@ -42,6 +42,10 @@ class PaymentMethodService {
       updatedAt: row.updated_at,
     };
   }
+
+  async deleteMethod(userId: number): Promise<void> {
+    await pool.query('DELETE FROM payment_methods WHERE user_id = ?', [userId]);
+  }
 }
 
 export default new PaymentMethodService();

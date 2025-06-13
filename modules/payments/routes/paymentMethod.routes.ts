@@ -66,6 +66,16 @@ function getUserId(req: Request): number | null {
  *         description: Método de pago encontrado
  *       404:
  *         description: No hay método guardado
+ *   delete:
+ *     summary: Elimina el método de pago guardado del usuario autenticado
+ *     tags: [PaymentMethod]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Método de pago eliminado
+ *       404:
+ *         description: No hay método guardado
  */
 
 // Guardar método de pago
@@ -94,6 +104,18 @@ router.get('/method', async (req: Request, res: Response) => {
     res.json(method);
   } catch (error) {
     res.status(500).json({ message: 'Error al obtener el método de pago', error });
+  }
+});
+
+// Eliminar método de pago guardado
+router.delete('/method', async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
+  try {
+    await paymentMethodService.deleteMethod(userId);
+    res.json({ message: 'Método de pago eliminado correctamente' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al eliminar el método de pago', error });
   }
 });
 
