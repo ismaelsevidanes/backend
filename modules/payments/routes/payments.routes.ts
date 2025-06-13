@@ -17,7 +17,7 @@ const router = express.Router();
 
 // Proteger las rutas de pagos con el middleware de autenticación y blacklist
 router.use(authenticateToken, checkJwtBlacklist);
-router.use(paymentMethodRoutes);
+router.use('/method', paymentMethodRoutes);
 
 /**
  * @swagger

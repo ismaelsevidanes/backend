@@ -79,7 +79,7 @@ function getUserId(req: Request): number | null {
  */
 
 // Guardar método de pago
-router.post('/method', async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
   const { cardNumber, expiry, cvc, cardName } = req.body;
@@ -95,7 +95,7 @@ router.post('/method', async (req: Request, res: Response) => {
 });
 
 // Obtener método de pago guardado
-router.get('/method', async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
   try {
@@ -108,7 +108,7 @@ router.get('/method', async (req: Request, res: Response) => {
 });
 
 // Eliminar método de pago guardado
-router.delete('/method', async (req: Request, res: Response) => {
+router.delete('/', async (req: Request, res: Response) => {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
   try {
