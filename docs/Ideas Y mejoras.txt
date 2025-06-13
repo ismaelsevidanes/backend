@@ -4,14 +4,9 @@
 
 -En el Readme.Md poner guia de instalacion
 
--Que al obtener el token del usuario (al hacer login) si es un user normal no obtener token por ende no poder hacer las solicitudes a las api
+-Que haya vistas protegidas segun el rol del usuario
 
 -Implementar en el register y solicitud api de register un confirm password y en la modificacion del usuario
-
--Que los modelos de fields, payments y reservations tenga un campo unico (se pueden crear con nombres iguales pero no pueden ser null)
-
--En el modelo reservations:
-    - Incluir un campo que sea user_id para saber que usuarios han reservado ese campo de futbol (aunque perderia el significado de total price de la tabla)
 
 -Mejorar validacón contraseña (que tenga 1 simbolo y 1 mayuscula)
 
@@ -27,6 +22,8 @@
 
 - Que se muestren automaticamente los cambios al cambiar de paginacion y de limite de paginacion en el constant
 
-Crear una vista y funcionalidad para ver las reservas que tiene ese usuario
+- Crear una vista y funcionalidad para ver las reservas que tiene ese usuario
 
-Al hacer el register que directamente se haga login con ese usuario y te redireccione a donde estabas como en el login
+- Sistema que cuando pasa la fecha de la reserva se resetee 
+
+- Al hacer el register que directamente se haga login con ese usuario y te redireccione a donde estabas como en el login

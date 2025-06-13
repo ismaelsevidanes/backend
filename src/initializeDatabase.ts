@@ -91,6 +91,21 @@ async function initializeDatabase() {
         );
       `);
 
+      // Crear tabla 'payment_methods' asociada a users
+      await dbConnection.query(`
+        CREATE TABLE IF NOT EXISTS payment_methods (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          type VARCHAR(20) NOT NULL,
+          encrypted_data TEXT NOT NULL,
+          iv VARCHAR(64) NOT NULL,
+          last4 VARCHAR(4) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+      `);
+
       console.log('Tablas creadas correctamente.');
     } catch (error) {
       console.error('Error al crear las tablas:', error);
