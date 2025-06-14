@@ -27,3 +27,19 @@
 - Sistema que cuando pasa la fecha de la reserva se resetee 
 
 - Al hacer el register que directamente se haga login con ese usuario y te redireccione a donde estabas como en el login
+
+- Tanto en en el componente ReservaForm como en el PaymentSummary otro boton que sea cancelar reserva, que te redirigia al /dashboard
+Vista metodo de pago:
+poner lo del header de los pasos 
+que tenga validacion tanto en back como en front
+que sea accesible mediante tabulador y enter los label con las opciones
+Mejorar el diseño del circulo del radio
+que al clickar el icono o el nombre de usario habra el modal como se hace en los demas
+que los inputs al completar pase al siguiente de forma automatica 
+que al poner los metodos de pago te cierre el desplegable y aparezca el mismo icono de la papelera y al clickar borre los datos del session storage y en caso de darle a guardar borre lo de la bd
+
+- Cancelar reserva con el tiempo no funciona ya que en la bd me pilla el horario de utc+2 y en el navegador tanto la fecha actual como el created_at pilla utc +0, la solucion cambiar el mysql y que pille utc+0
+DEBUG cancel-reservation:
+createdAt: 2025-06-14T19:54:45.000Z
+now: 2025-06-14T19:57:39.276Z
+diffMinutes: 2.9046

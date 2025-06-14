@@ -609,4 +609,93 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
   })().catch(next);
 });
 
+/**
+ * @swagger
+ * /api/reservations/{id}/cancel:
+ *   delete:
+ *     summary: Cancela una reserva (solo el creador en los primeros 15 minutos o un administrador)
+ *     tags: [Reservations]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID de la reserva
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Reserva cancelada correctamente
+ *       403:
+ *         description: No tienes permiso para cancelar esta reserva o ha pasado el tiempo permitido
+ *       404:
+ *         description: Reserva no encontrada
+ *       500:
+ *         description: Error al cancelar la reserva
+ */
+// Nueva ruta: cancelar reserva solo si es el creador (menos de 15 min) o admin
+router.delete('/:id/cancel', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    try {
+      const user = (req as any).user; // JWT payload
+      const { id } = req.params;
+      const connection = await pool.getConnection();
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT * FROM reservations WHERE id = ?',
+        [id]
+      );
+      if (!reservationRows.length) {
+        connection.release();
+        return res.status(404).json({ message: 'Reserva no encontrada' });
+      }
+      const reservation = reservationRows[0];
+      // Si es admin, puede cancelar siempre
+      if (user && (user as any).role === 'admin') {
+        await connection.query('DELETE FROM reservations WHERE id = ?', [id]);
+        connection.release();
+        return res.json({ message: 'Reserva cancelada por administrador' });
+      }
+      // Solo el usuario que hizo la reserva (primer user_id de reservation_users)
+      const [userRows] = await connection.query<RowDataPacket[]>(
+        'SELECT user_id FROM reservation_users WHERE reservation_id = ? ORDER BY user_id ASC LIMIT 1',
+        [id]
+      );
+      // Comprobar created_at real de la reserva
+      const createdAt = reservation.created_at ? new Date(reservation.created_at) : null;
+      const now = new Date();
+      const diffMinutes = createdAt ? (now.getTime() - createdAt.getTime()) / 60000 : null;
+      // LOG para depuración de fechas y diferencia
+      // console.log('DEBUG cancel-reservation:');
+      // console.log('createdAt:', createdAt);
+      // console.log('now:', now);
+      // console.log('diffMinutes:', diffMinutes);
+      if (
+        userRows.length > 0 &&
+        userRows[0].user_id === user.id &&
+        createdAt !== null &&
+        diffMinutes !== null &&
+        diffMinutes <= 15
+      ) {
+        await connection.query('DELETE FROM reservations WHERE id = ?', [id]);
+        connection.release();
+        return res.json({ message: 'Reserva cancelada correctamente' });
+      } else if (
+        userRows.length > 0 &&
+        userRows[0].user_id === user.id &&
+        createdAt !== null &&
+        diffMinutes !== null &&
+        diffMinutes > 15
+      ) {
+        connection.release();
+        return res.status(403).json({ message: 'Solo puedes cancelar en los primeros 15 minutos' });
+      }
+      connection.release();
+      return res.status(403).json({ message: 'No tienes permiso para cancelar esta reserva' });
+    } catch (err) {
+      next(err);  
+    }
+  })();
+});
+
 export default router;
