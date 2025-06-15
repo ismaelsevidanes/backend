@@ -133,6 +133,7 @@ router.get('/', async (req: Request, res: Response) => {
     res.json({
       data: fieldsWithSpots,
       totalPages,
+      totalItems: total
     });
   } catch (error) {
     console.error('Error al obtener los campos:', error);

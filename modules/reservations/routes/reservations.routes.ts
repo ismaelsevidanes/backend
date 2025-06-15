@@ -550,6 +550,85 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
 
 /**
  * @swagger
+ * /api/reservations/me:
+ *   get:
+ *     summary: Obtiene todas las reservas del usuario autenticado
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de reservas del usuario
+ *       401:
+ *         description: No autorizado
+ *       500:
+ *         description: Error al obtener las reservas
+ */
+router.get('/me', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    try {
+      const userJwt = (req as any).user;
+      if (!userJwt || !userJwt.id) {
+        return res.status(401).json({ message: 'No autorizado' });
+      }
+      const userId = userJwt.id;
+      const page = parseInt((req.query.page as string) || '1', 10);
+      const pageSize = parseInt((req.query.pageSize as string) || '10', 10);
+      const offset = (page - 1) * pageSize;
+      const connection = await pool.getConnection();
+      // Total de reservas del usuario
+      const [totalResult] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) as total FROM reservation_users WHERE user_id = ?`,
+        [userId]
+      );
+      const totalReservations = totalResult[0]?.total || 0;
+      const totalPages = Math.ceil(totalReservations / pageSize);
+      // Buscar las reservas donde el usuario está en reservation_users (con paginación)
+      const [reservations] = await connection.query<RowDataPacket[]>(
+        `SELECT r.*, f.name as fieldName, f.address as fieldAddress, ru.quantity, DATE(r.start_time) as date, r.slot
+         FROM reservations r
+         JOIN reservation_users ru ON r.id = ru.reservation_id
+         JOIN fields f ON r.field_id = f.id
+         WHERE ru.user_id = ?
+         ORDER BY r.start_time DESC
+         LIMIT ? OFFSET ?`,
+        [userId, pageSize, offset]
+      );
+      connection.release();
+      // Añadir slotLabel y formatear respuesta
+      const SLOTS = [
+        { id: 1, label: "09:00 - 10:30" },
+        { id: 2, label: "10:30 - 12:00" },
+        { id: 3, label: "12:00 - 13:30" },
+        { id: 4, label: "13:30 - 15:00" },
+      ];
+      const mapped = reservations.map(r => ({
+        id: r.id,
+        fieldName: r.fieldName,
+        fieldAddress: r.fieldAddress,
+        date: r.date ? new Date(r.date).toLocaleDateString('es-ES') : '',
+        slotLabel: SLOTS.find(s => s.id === Number(r.slot))?.label || r.slot,
+        total_price: r.total_price,
+        created_at: r.created_at,
+        creator_id: r.creator_id,
+        status: r.status,
+        quantity: r.quantity
+      }));
+      res.json({
+        data: mapped,
+        totalPages,
+        totalReservations,
+        currentPage: page
+      });
+    } catch (error) {
+      console.error('Error al obtener las reservas del usuario:', error);
+      res.status(500).json({ message: 'Error al obtener las reservas del usuario' });
+    }
+  })().catch(next);
+});
+
+/**
+ * @swagger
  * /api/reservations/{id}:
  *   delete:
  *     summary: Elimina una reserva existente
