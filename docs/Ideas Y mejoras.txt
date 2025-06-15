@@ -4,11 +4,11 @@
 
 -En el Readme.Md poner guia de instalacion
 
--Que haya vistas protegidas segun el rol del usuario
+-Que haya vistas protegidas segun el rol del usuario (el AdminDashboard)
 
 -Implementar en el register y solicitud api de register un confirm password y en la modificacion del usuario
 
--Mejorar validacón contraseña (que tenga 1 simbolo y 1 mayuscula)
+-Mejorar validacón contraseña (que tenga 1 simbolo y 1 mayuscula) y validacion de la mayoria de cosas
 
 -navegar por las pestañas de admin solo si estas logueado o registrado como administrador(rutas protegidas)
 
@@ -24,9 +24,13 @@
 
 - Crear una vista y funcionalidad para ver las reservas que tiene ese usuario
 
-- Sistema que cuando pasa la fecha de la reserva se resetee 
+- Sistema que cuando pasa la fecha de la reserva se resetee y que las plazas son segun el dia y slot horario y no el campo de futbol 
 
 - Al hacer el register que directamente se haga login con ese usuario y te redireccione a donde estabas como en el login
+
+- Lo des Step en las dos vistas que sea responsive
+
+- Que al hacer logout desde el desplegable no te redireccione al login si no a la misma vista que estaba
 
 - Tanto en en el componente ReservaForm como en el PaymentSummary otro boton que sea cancelar reserva, que te redirigia al /dashboard
 Vista metodo de pago:

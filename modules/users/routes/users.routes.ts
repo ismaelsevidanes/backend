@@ -191,6 +191,9 @@ router.get('/me', (req, res, next) => {
  *       500:
  *         description: Error al actualizar el usuario
  */
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
+
 router.patch('/me', async (req, res, next) => {
   (async () => {
     try {
@@ -227,11 +230,19 @@ router.patch('/me', async (req, res, next) => {
       const sql = `UPDATE users SET ${updates.join(', ')} WHERE email = ?`;
       values.push(userJwt.email);
       const [result]: any = await connection.query(sql, values);
+      // Obtener los datos actualizados del usuario
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id, name, email, role FROM users WHERE ' + (email ? 'email = ?' : 'email = ?'),
+        [email || userJwt.email]
+      );
       connection.release();
-      if (!result || (typeof result.affectedRows === 'number' && result.affectedRows === 0)) {
+      if (!result || (typeof result.affectedRows === 'number' && result.affectedRows === 0) || rows.length === 0) {
         return res.status(404).json({ message: 'Usuario no encontrado' });
       }
-      res.json({ message: 'Usuario actualizado correctamente' });
+      // Generar nuevo token con los datos actualizados
+      const user = rows[0];
+      const token = jwt.sign({ id: user.id, role: user.role, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+      res.json({ message: 'Usuario actualizado correctamente', token });
     } catch (error) {
       next(error);
     }
