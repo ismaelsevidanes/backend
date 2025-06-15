@@ -137,7 +137,7 @@ router.post('/:reservationId/users', (req, res, next) => {
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
       // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
       const [userCountRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(ru.user_id) as count FROM reservations r
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
           JOIN reservation_users ru ON ru.reservation_id = r.id
           WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
         [field_id, date, slot]
@@ -145,7 +145,7 @@ router.post('/:reservationId/users', (req, res, next) => {
       const currentUsers = userCountRows[0]?.count || 0;
       // Contar usuarios actuales de ESTA reserva
       const [currentUsersRows] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
+        'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
         [reservationId]
       );
       const currentCount = currentUsersRows[0].count;
@@ -261,13 +261,12 @@ router.put('/:reservationId/users', (req, res, next) => {
       // Calcular plazas a añadir
       let plazasNuevas = 0;
       for (let i = 0; i < user_ids.length; i++) {
-        plazasNuevas += Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
+        plazasNuevas += quantities && quantities[i] ? Number(quantities[i]) : 1;
       }
       // Si sumamos las nuevas plazas, ¿superamos el máximo?
       if (currentUsers - currentCount + plazasNuevas > maxUsers) {
         connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
-        return;
+        return res.status(400).json({ message: `El máximo de plazas para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
       }
       await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [reservationId]);
       for (let i = 0; i < user_ids.length; i++) {

@@ -18,8 +18,6 @@
 
 -Poner la misma validacion en el frontend del register que el update user del dashboard admin 
 
-- Los created_at y updated_at tienen zona horario utc+0 y no horario español (utc+2)
-
 - Implementar las validaciones en los actualizar igual, como esta en los crear
 
 - En el login, que sea nombre de usuario o correo, en el primer input
@@ -29,8 +27,6 @@
 - Crear una vista y funcionalidad para ver las reservas que tiene ese usuario
 
 - Sistema que cuando pasa la fecha de la reserva se resetee y que las plazas son segun el dia y slot horario y no el campo de futbol 
-
-- Al hacer el register que directamente se haga login con ese usuario y te redireccione a donde estabas como en el login
 
 -Que al hacer logout en la vista summary ahi si te tiene que redireccionar a login porque es una vista protegida y si haces login con otro usuario no te tendria que llevar a esa vista porque no hizo esa reserva
 
@@ -58,9 +54,3 @@ que sea accesible mediante tabulador y enter los label con las opciones
 Mejorar el diseño del circulo del radio
 que los inputs al completar pase al siguiente de forma automatica 
 
-
-- Cancelar reserva con el tiempo no funciona ya que en la bd me pilla el horario de utc+2 y en el navegador tanto la fecha actual como el created_at pilla utc +0, la solucion cambiar el mysql y que pille utc+0
-DEBUG cancel-reservation:
-createdAt: 2025-06-14T19:54:45.000Z
-now: 2025-06-14T19:57:39.276Z
-diffMinutes: 2.9046
