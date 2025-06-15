@@ -435,127 +435,194 @@ router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
  *       500:
  *         description: Error al actualizar la reserva
  */
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
-  const { id } = req.params;
-  const { field_id, date, slot, total_price, user_ids } = req.body;
+router.patch('/:id', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    const { id } = req.params;
+    const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
 
-  if ((date && !slot) || (!date && slot)) {
-    res.status(400).json({ message: 'Si actualizas la fecha o el slot, debes proporcionar ambos' });
-    return;
-  }
-  let start_time, end_time;
-  if (date && slot) {
-    if (!isWeekend(date)) {
-      res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
+    if ((date && !slot) || (!date && slot)) {
+      res.status(400).json({ message: 'Si actualizas la fecha o el slot, debes proporcionar ambos' });
       return;
     }
-    const slotObj = SLOTS.find(s => s.id === Number(slot));
-    if (!slotObj) {
-      res.status(400).json({ message: 'Slot no válido' });
-      return;
-    }
-    start_time = `${date} ${slotObj.start}:00`;
-    end_time = `${date} ${slotObj.end}:00`;
-  }
-
-  try {
-    const connection = await pool.getConnection();
-    // Validar campo si se pasa
-    let fieldType, maxUsers;
-    if (field_id) {
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        'SELECT type FROM fields WHERE id = ?',
-        [field_id]
-      );
-      if (fieldRows.length === 0) {
-        connection.release();
-        res.status(404).json({ message: 'Campo no encontrado' });
-        return;
-      }
-      fieldType = fieldRows[0].type;
-      maxUsers = fieldType === 'futbol7' ? 14 : 22;
-    }
-    // Validar usuarios si se pasan y se actualiza fecha/slot/campo
-    if (Array.isArray(user_ids) && (date && slot && field_id)) {
-      const [userCountRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
-          JOIN reservation_users ru ON ru.reservation_id = r.id
-          WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
-        [field_id, date, start_time, id]
-      );
-      const currentUsers = userCountRows[0]?.count || 0;
-      if (typeof maxUsers !== 'number') {
-        connection.release();
-        res.status(500).json({ message: 'No se pudo determinar el máximo de usuarios para este campo.' });
-        return;
-      }
-      if (currentUsers + user_ids.length > maxUsers) {
-        connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
-        return;
-      }
-    }
-    // Construir updates
-    const updates: string[] = [];
-    const values: any[] = [];
-    if (field_id) {
-      updates.push('field_id = ?');
-      values.push(field_id);
-    }
+    let start_time, end_time;
     if (date && slot) {
-      updates.push('start_time = ?');
-      values.push(start_time);
-      updates.push('end_time = ?');
-      values.push(end_time);
-      updates.push('date = ?');
-      values.push(date);
-      updates.push('slot = ?');
-      values.push(slot);
-    }
-    if (total_price) {
-      updates.push('total_price = ?');
-      values.push(total_price);
-    }
-    if (updates.length === 0) {
-      res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
-      connection.release();
-      return;
-    }
-    values.push(id);
-    const [result] = await connection.query<OkPacket>(
-      `UPDATE reservations SET ${updates.join(', ')} WHERE id = ?`,
-      values
-    );
-    // Si se pasan usuarios, actualizar tabla intermedia
-    if (Array.isArray(user_ids)) {
-      await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
-      for (const userId of user_ids) {
-        await connection.query(
-          'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-          [id, userId]
-        );
+      if (!isWeekend(date)) {
+        res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
+        return;
       }
+      const slotObj = SLOTS.find(s => s.id === Number(slot));
+      if (!slotObj) {
+        res.status(400).json({ message: 'Slot no válido' });
+        return;
+      }
+      start_time = `${date} ${slotObj.start}:00`;
+      end_time = `${date} ${slotObj.end}:00`;
     }
-    connection.release();
-    if (result.affectedRows === 0) {
-      res.status(404).json({ message: 'Reserva no encontrada' });
-      return;
+
+    try {
+      const connection = await pool.getConnection();
+      // Validar campo si se pasa
+      let fieldType, maxUsers;
+      if (field_id) {
+        const [fieldRows] = await connection.query<RowDataPacket[]>(
+          'SELECT type FROM fields WHERE id = ?',
+          [field_id]
+        );
+        if (fieldRows.length === 0) {
+          connection.release();
+          res.status(404).json({ message: 'Campo no encontrado' });
+          return;
+        }
+        fieldType = fieldRows[0].type;
+        maxUsers = fieldType === 'futbol7' ? 14 : 22;
+      }
+      // Validar usuarios si se pasan y se actualiza fecha/slot/campo
+      if (Array.isArray(user_ids) && (date && slot && field_id)) {
+        const [userCountRows] = await connection.query<RowDataPacket[]>(
+          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+            JOIN reservation_users ru ON ru.reservation_id = r.id
+            WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
+          [field_id, date, start_time, id]
+        );
+        const currentUsers = userCountRows[0]?.count || 0;
+        if (typeof maxUsers !== 'number') {
+          connection.release();
+          res.status(500).json({ message: 'No se pudo determinar el máximo de usuarios para este campo.' });
+          return;
+        }
+        // Calcular plazas a reservar
+        let plazasNuevas = 0;
+        const userCountMap: Record<number, number> = {};
+        for (let i = 0; i < user_ids.length; i++) {
+          const userId = user_ids[i];
+          let quantity = 1;
+          if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+            quantity = Number(quantities[i]);
+          }
+          userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
+          plazasNuevas += quantity;
+        }
+        if (currentUsers + plazasNuevas > maxUsers) {
+          connection.release();
+          res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+          return;
+        }
+      }
+      // Construir updates
+      const updates: string[] = [];
+      const values: any[] = [];
+      if (field_id) {
+        updates.push('field_id = ?');
+        values.push(field_id);
+      }
+      if (date && slot) {
+        updates.push('start_time = ?');
+        values.push(start_time);
+        updates.push('end_time = ?');
+        values.push(end_time);
+        updates.push('date = ?');
+        values.push(date);
+        updates.push('slot = ?');
+        values.push(slot);
+      }
+      if (total_price) {
+        updates.push('total_price = ?');
+        values.push(total_price);
+      }
+      if (updates.length === 0) {
+        res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+        connection.release();
+        return;
+      }
+      values.push(id);
+      const [result] = await connection.query<OkPacket>(
+        `UPDATE reservations SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+      // Si se pasan usuarios, actualizar tabla intermedia
+      if (Array.isArray(user_ids)) {
+        await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
+        for (let i = 0; i < user_ids.length; i++) {
+          const userId = user_ids[i];
+          let quantity = 1;
+          if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+            quantity = Number(quantities[i]);
+          }
+          await connection.query(
+            'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
+            [id, userId, quantity]
+          );
+        }
+      }
+      connection.release();
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Reserva no encontrada' });
+      }
+      res.json({ message: 'Reserva actualizada correctamente' });
+    } catch (error) {
+      console.error('Error al actualizar la reserva:', error);
+      next(error);
     }
-    res.json({ message: 'Reserva actualizada correctamente' });
-  } catch (error) {
-    console.error('Error al actualizar la reserva:', error);
-    next(error);
-  }
+  })().catch(next);
 });
 
 /**
  * @swagger
  * /api/reservations/me:
  *   get:
- *     summary: Obtiene todas las reservas del usuario autenticado
+ *     summary: Obtiene todas las reservas del usuario autenticado (con filtros)
  *     tags: [Reservations]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *       - in: query
+ *         name: pageSize
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Tamaño de página
+ *       - in: query
+ *         name: precioMin
+ *         schema:
+ *           type: number
+ *         description: Precio mínimo de la reserva
+ *       - in: query
+ *         name: precioMax
+ *         schema:
+ *           type: number
+ *         description: Precio máximo de la reserva
+ *       - in: query
+ *         name: ubicacion
+ *         schema:
+ *           type: string
+ *         description: Filtrar por dirección del campo (búsqueda parcial)
+ *       - in: query
+ *         name: localidad
+ *         schema:
+ *           type: string
+ *         description: Filtrar por localidad del campo (búsqueda parcial)
+ *       - in: query
+ *         name: fecha
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha exacta de la reserva (YYYY-MM-DD)
+ *       - in: query
+ *         name: numReservasMin
+ *         schema:
+ *           type: integer
+ *         description: Mínimo número de plazas/reservas
+ *       - in: query
+ *         name: numReservasMax
+ *         schema:
+ *           type: integer
+ *         description: Máximo número de plazas/reservas
  *     responses:
  *       200:
  *         description: Lista de reservas del usuario
@@ -575,24 +642,56 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
       const page = parseInt((req.query.page as string) || '1', 10);
       const pageSize = parseInt((req.query.pageSize as string) || '10', 10);
       const offset = (page - 1) * pageSize;
+      // Filtros
+      const { precioMin, precioMax, ubicacion, localidad, fecha, numReservasMin, numReservasMax } = req.query;
+      let whereClauses: string[] = ["ru.user_id = ?"];
+      let params: any[] = [userId];
+      if (precioMin) {
+        whereClauses.push('r.total_price >= ?');
+        params.push(Number(precioMin));
+      }
+      if (precioMax) {
+        whereClauses.push('r.total_price <= ?');
+        params.push(Number(precioMax));
+      }
+      if (ubicacion) {
+        whereClauses.push('(LOWER(f.address) LIKE ? OR LOWER(f.name) LIKE ?)');
+        params.push(`%${ubicacion.toString().toLowerCase()}%`);
+        params.push(`%${ubicacion.toString().toLowerCase()}%`);
+      }
+      if (localidad) {
+        whereClauses.push('LOWER(f.location) LIKE ?');
+        params.push(`%${localidad.toString().toLowerCase()}%`);
+      }
+      // El filtro de fecha ahora solo ordena, no filtra
+      let orderBy = 'ORDER BY r.start_time DESC';
+      if (fecha) {
+        orderBy = 'ORDER BY ABS(DATEDIFF(DATE(r.start_time), ?)) ASC, r.start_time DESC';
+        params.push(fecha);
+      }
+      const where = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
       const connection = await pool.getConnection();
-      // Total de reservas del usuario
+      // Total de reservas filtradas
       const [totalResult] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) as total FROM reservation_users WHERE user_id = ?`,
-        [userId]
+        `SELECT COUNT(*) as total FROM reservation_users ru
+         JOIN reservations r ON r.id = ru.reservation_id
+         JOIN fields f ON r.field_id = f.id
+         ${where}`,
+        params
       );
       const totalReservations = totalResult[0]?.total || 0;
       const totalPages = Math.ceil(totalReservations / pageSize);
-      // Buscar las reservas donde el usuario está en reservation_users (con paginación)
+      // Buscar las reservas filtradas
       const [reservations] = await connection.query<RowDataPacket[]>(
-        `SELECT r.*, f.name as fieldName, f.address as fieldAddress, ru.quantity, DATE(r.start_time) as date, r.slot
-         FROM reservations r
-         JOIN reservation_users ru ON r.id = ru.reservation_id
-         JOIN fields f ON r.field_id = f.id
-         WHERE ru.user_id = ?
-         ORDER BY r.start_time DESC
-         LIMIT ? OFFSET ?`,
-        [userId, pageSize, offset]
+        `SELECT r.*, f.name as fieldName, f.address as fieldAddress, f.location as fieldLocation, ru.quantity, DATE(r.start_time) as date, r.slot,
+          (SELECT user_id FROM reservation_users WHERE reservation_id = r.id ORDER BY user_id ASC LIMIT 1) as creator_id
+          FROM reservations r
+          JOIN reservation_users ru ON r.id = ru.reservation_id
+          JOIN fields f ON r.field_id = f.id
+          ${where}
+          ${orderBy}
+          LIMIT ? OFFSET ?`,
+        [...params, pageSize, offset]
       );
       connection.release();
       // Añadir slotLabel y formatear respuesta
@@ -606,10 +705,11 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
         id: r.id,
         fieldName: r.fieldName,
         fieldAddress: r.fieldAddress,
+        fieldLocation: r.fieldLocation,
         date: r.date ? new Date(r.date).toLocaleDateString('es-ES') : '',
         slotLabel: SLOTS.find(s => s.id === Number(r.slot))?.label || r.slot,
         total_price: r.total_price,
-        created_at: r.created_at,
+        created_at: r.created_at ? new Date(r.created_at).toISOString() : '',
         creator_id: r.creator_id,
         status: r.status,
         quantity: r.quantity
