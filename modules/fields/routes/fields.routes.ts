@@ -208,6 +208,82 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/fields/{id}/availability:
+ *   get:
+ *     summary: Consulta las plazas disponibles para un campo, fecha y slot
+ *     tags: [Fields]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del campo
+ *       - in: query
+ *         name: date
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha de la reserva (YYYY-MM-DD)
+ *       - in: query
+ *         name: slot
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Slot horario (1-4)
+ *     responses:
+ *       200:
+ *         description: Plazas disponibles para ese campo, fecha y slot
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 availableSpots:
+ *                   type: integer
+ *                   example: 10
+ *       400:
+ *         description: Faltan parámetros
+ *       404:
+ *         description: Campo no encontrado
+ */
+router.get('/:id/availability', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    const fieldId = Number(req.params.id);
+    const { date, slot } = req.query;
+    if (!fieldId || !date || !slot) {
+      return res.status(400).json({ message: 'Faltan parámetros' });
+    }
+    try {
+      const connection = await pool.getConnection();
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [fieldId]
+      );
+      if (!fieldRows.length) {
+        connection.release();
+        return res.status(404).json({ message: 'Campo no encontrado' });
+      }
+      const maxUsers = fieldRows[0].type === 'futbol7' ? 14 : 22;
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as count
+         FROM reservations r
+         JOIN reservation_users ru ON ru.reservation_id = r.id
+         WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [fieldId, date, slot]
+      );
+      connection.release();
+      const reserved = rows[0]?.count || 0;
+      res.json({ availableSpots: Math.max(0, maxUsers - reserved) });
+    } catch (error) {
+      res.status(500).json({ message: 'Error al consultar disponibilidad' });
+    }
+  })().catch(next);
+});
+
 // Proteger todas las rutas siguientes con autenticación y blacklist
 router.use(authenticateToken, checkJwtBlacklist);
 
