@@ -14,17 +14,18 @@ async function seedDatabase() {
   });
   try {
     // Encriptar contraseñas antes de insertar
-    const hashedPassword1 = await bcrypt.hash('123password', 10);
-    const hashedPassword2 = await bcrypt.hash('123password', 10);
+    const hashedPassword1 = await bcrypt.hash('12Hola34.', 10);
+    const hashedPassword2 = await bcrypt.hash('12Hola34', 10);
 
     // Insertar o actualizar datos en la tabla 'users'
     await connection.query(`
-      INSERT INTO users (id, name, email, password) VALUES
-      (1, 'hola', 'hola@dreamer.com', ?),
-      (2, 'hola', 'hola@prueba.com', ?)
+      INSERT INTO users (id, name, email, password, role) VALUES
+      (1, 'Ismael', 'hola@dreamer.com', ?, 'admin'),
+      (2, 'hola', 'hola@prueba.com', ?, 'user')
       ON DUPLICATE KEY UPDATE
       name = VALUES(name),
-      password = VALUES(password);
+      password = VALUES(password),
+      role = VALUES(role);
     `, [hashedPassword1, hashedPassword2]);
 
     // Insertar o actualizar datos en la tabla 'fields'

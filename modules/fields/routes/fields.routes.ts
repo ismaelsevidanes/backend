@@ -1,9 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
+import { body, validationResult } from 'express-validator';
 
 const router = express.Router();
 
@@ -250,38 +251,42 @@ router.get('/:id', async (req: Request, res: Response) => {
  *       404:
  *         description: Campo no encontrado
  */
-router.get('/:id/availability', function (req: Request, res: Response, next: NextFunction) {
+router.get('/:id/availability', function (req: Request, res: Response) {
   (async () => {
-    const fieldId = Number(req.params.id);
+    const { id } = req.params;
     const { date, slot } = req.query;
-    if (!fieldId || !date || !slot) {
-      return res.status(400).json({ message: 'Faltan parámetros' });
+    if (!date || !slot) {
+      return res.status(400).json({ message: 'Faltan parámetros: date y slot son obligatorios' });
     }
     try {
       const connection = await pool.getConnection();
+      // 1. Obtener tipo de campo
       const [fieldRows] = await connection.query<RowDataPacket[]>(
-        'SELECT type FROM fields WHERE id = ?',
-        [fieldId]
+        'SELECT type FROM fields WHERE id = ?', [id]
       );
-      if (!fieldRows.length) {
+      if (!fieldRows || fieldRows.length === 0) {
         connection.release();
         return res.status(404).json({ message: 'Campo no encontrado' });
       }
-      const maxUsers = fieldRows[0].type === 'futbol7' ? 14 : 22;
-      const [rows] = await connection.query<RowDataPacket[]>(
-        `SELECT COALESCE(SUM(ru.quantity),0) as count
+      const fieldType = fieldRows[0].type;
+      const maxSpots = fieldType === 'futbol7' ? 14 : 22;
+      // 2. Sumar todas las plazas ya reservadas para ese campo, fecha y slot (LEFT JOIN para incluir reservas sin usuarios)
+      const [reservas] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as total
          FROM reservations r
-         JOIN reservation_users ru ON ru.reservation_id = r.id
-         WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
-        [fieldId, date, slot]
+         LEFT JOIN reservation_users ru ON ru.reservation_id = r.id
+         WHERE r.field_id = ? AND date(r.start_time) = ? AND r.slot = ?`,
+        [id, date, slot]
       );
+      const total = reservas[0]?.total || 0;
       connection.release();
-      const reserved = rows[0]?.count || 0;
-      res.json({ availableSpots: Math.max(0, maxUsers - reserved) });
+      // 3. Calcular plazas libres
+      const availableSpots = Math.max(0, maxSpots - total);
+      res.json({ availableSpots });
     } catch (error) {
-      res.status(500).json({ message: 'Error al consultar disponibilidad' });
+      res.status(500).json({ message: 'Error al consultar plazas disponibles', error });
     }
-  })().catch(next);
+  })();
 });
 
 // Proteger todas las rutas siguientes con autenticación y blacklist
@@ -299,6 +304,13 @@ router.use(authenticateToken, checkJwtBlacklist);
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - name
+ *               - type
+ *               - description
+ *               - address
+ *               - location
+ *               - price_per_hour
  *             properties:
  *               name:
  *                 type: string
@@ -316,27 +328,44 @@ router.use(authenticateToken, checkJwtBlacklist);
  *     responses:
  *       201:
  *         description: Campo creado correctamente
+ *       400:
+ *         description: Validación fallida
  *       500:
  *         description: Error al crear el campo
  */
-router.post('/', async (req: Request, res: Response) => {
-  const { name, type, description, address, location, price_per_hour } = req.body;
-
-  try {
-    const connection = await pool.getConnection();
-    await connection.query(
-      'INSERT INTO fields (name, type, description, address, location, price_per_hour) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, type, description, address, location, price_per_hour]
-    );
-    connection.release();
-
-    console.log(`Campo creado: ${name}, Tipo: ${type}, Ubicación: ${location}, Precio por hora: ${price_per_hour}`);
-    res.status(201).json({ message: 'Campo creado correctamente' });
-  } catch (error) {
-    console.error('Error al crear el campo:', error);
-    res.status(500).json({ message: 'Error al crear el campo' });
+// Crear campo
+router.post('/',
+  requireAdmin,
+  [
+    body('name').notEmpty().withMessage('El nombre es obligatorio'),
+    body('type').isIn(['futbol7', 'futbol11']).withMessage('Tipo inválido'),
+    body('description').notEmpty().withMessage('La descripción es obligatoria'),
+    body('address').notEmpty().withMessage('La dirección es obligatoria'),
+    body('location').notEmpty().withMessage('La localización es obligatoria'),
+    body('price_per_hour').isFloat({ min: 1 }).withMessage('El precio debe ser mayor que 0'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    const { name, type, description, address, location, price_per_hour } = req.body;
+    try {
+      const connection = await pool.getConnection();
+      await connection.query(
+        'INSERT INTO fields (name, type, description, address, location, price_per_hour) VALUES (?, ?, ?, ?, ?, ?)',
+        [name, type, description, address, location, price_per_hour]
+      );
+      connection.release();
+      console.log(`Campo creado: ${name}, Tipo: ${type}, Ubicación: ${location}, Precio por hora: ${price_per_hour}`);
+      res.status(201).json({ message: 'Campo creado correctamente' });
+    } catch (error) {
+      console.error('Error al crear el campo:', error);
+      res.status(500).json({ message: 'Error al crear el campo' });
+    }
   }
-});
+);
 
 /**
  * @swagger
@@ -374,16 +403,32 @@ router.post('/', async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Campo actualizado correctamente
+ *       400:
+ *         description: Validación fallida
  *       404:
  *         description: Campo no encontrado
  *       500:
  *         description: Error al actualizar el campo
  */
-router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
-  const { id } = req.params;
-  const { name, type, description, address, location, price_per_hour } = req.body;
-
-  (async () => {
+// Actualizar campo
+router.put('/:id',
+  requireAdmin,
+  [
+    body('name').optional().notEmpty().withMessage('El nombre es obligatorio'),
+    body('type').optional().isIn(['futbol7', 'futbol11']).withMessage('Tipo inválido'),
+    body('description').optional().notEmpty().withMessage('La descripción es obligatoria'),
+    body('address').optional().notEmpty().withMessage('La dirección es obligatoria'),
+    body('location').optional().notEmpty().withMessage('La localización es obligatoria'),
+    body('price_per_hour').optional().isFloat({ min: 1 }).withMessage('El precio debe ser mayor que 0'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    const { id } = req.params;
+    const { name, type, description, address, location, price_per_hour } = req.body;
     try {
       const connection = await pool.getConnection();
       const [result] = await connection.query<OkPacket>(
@@ -391,25 +436,24 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
         [name, type, description, address, location, price_per_hour, id]
       );
       connection.release();
-
       if (result.affectedRows === 0) {
-        return res.status(404).json({ message: 'Campo no encontrado' });
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
       }
-
       console.log(`Campo actualizado: ID ${id}, ${name}, Tipo: ${type}, Ubicación: ${location}, Precio por hora: ${price_per_hour}`);
       res.json({ message: 'Campo actualizado correctamente' });
     } catch (error) {
       console.error('Error al actualizar el campo:', error);
       res.status(500).json({ message: 'Error al actualizar el campo' });
     }
-  })().catch(next);
-});
+  }
+);
 
 /**
  * @swagger
  * /api/fields/{id}:
  *   patch:
- *     summary: Actualiza campos específicos de un usuario existente (Borrar en el Body los campos que no se quieren actualizar)
+ *     summary: Actualiza campos específicos de un campo existente
  *     tags: [Fields]
  *     parameters:
  *       - in: path
@@ -441,70 +485,88 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
  *     responses:
  *       200:
  *         description: Campo actualizado correctamente
+ *       400:
+ *         description: Validación fallida
  *       404:
  *         description: Campo no encontrado
  *       500:
  *         description: Error al actualizar el campo
  */
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  const { id } = req.params;
-  const { name, type, description, address, location, price_per_hour } = req.body;
-
-  try {
-    const connection = await pool.getConnection();
-
-    const updates: string[] = [];
-    const values: any[] = [];
-
-    if (name) {
-      updates.push('name = ?');
-      values.push(name);
-    }
-    if (type) {
-      updates.push('type = ?');
-      values.push(type);
-    }
-    if (description) {
-      updates.push('description = ?');
-      values.push(description);
-    }
-    if (address) {
-      updates.push('address = ?');
-      values.push(address);
-    }
-    if (location) {
-      updates.push('location = ?');
-      values.push(location);
-    }
-    if (price_per_hour) {
-      updates.push('price_per_hour = ?');
-      values.push(price_per_hour);
-    }
-
-    if (updates.length === 0) {
-      res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+router.patch('/:id',
+  requireAdmin,
+  [
+    body('name').optional().notEmpty().withMessage('El nombre es obligatorio'),
+    body('type').optional().isIn(['futbol7', 'futbol11']).withMessage('Tipo inválido'),
+    body('description').optional().notEmpty().withMessage('La descripción es obligatoria'),
+    body('address').optional().notEmpty().withMessage('La dirección es obligatoria'),
+    body('location').optional().notEmpty().withMessage('La localización es obligatoria'),
+    body('price_per_hour').optional().isFloat({ min: 1 }).withMessage('El precio debe ser mayor que 0'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
       return;
     }
+    const { id } = req.params;
+    const { name, type, description, address, location, price_per_hour } = req.body;
 
-    values.push(id);
+    try {
+      const connection = await pool.getConnection();
 
-    const [result] = await connection.query<OkPacket>(
-      `UPDATE fields SET ${updates.join(', ')} WHERE id = ?`,
-      values
-    );
-    connection.release();
+      const updates: string[] = [];
+      const values: any[] = [];
 
-    if (result.affectedRows === 0) {
-      res.status(404).json({ message: 'Campo no encontrado' });
-      return;
+      if (name) {
+        updates.push('name = ?');
+        values.push(name);
+      }
+      if (type) {
+        updates.push('type = ?');
+        values.push(type);
+      }
+      if (description) {
+        updates.push('description = ?');
+        values.push(description);
+      }
+      if (address) {
+        updates.push('address = ?');
+        values.push(address);
+      }
+      if (location) {
+        updates.push('location = ?');
+        values.push(location);
+      }
+      if (price_per_hour) {
+        updates.push('price_per_hour = ?');
+        values.push(price_per_hour);
+      }
+
+      if (updates.length === 0) {
+        res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+        return;
+      }
+
+      values.push(id);
+
+      const [result] = await connection.query<OkPacket>(
+        `UPDATE fields SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+      connection.release();
+
+      if (result.affectedRows === 0) {
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
+      }
+
+      res.json({ message: 'Campo actualizado correctamente' });
+    } catch (error) {
+      console.error('Error al actualizar el campo:', error);
+      next(error);
     }
-
-    res.json({ message: 'Campo actualizado correctamente' });
-  } catch (error) {
-    console.error('Error al actualizar el campo:', error);
-    next(error);
   }
-});
+);
 
 /**
  * @swagger
@@ -527,7 +589,7 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Pr
  *       500:
  *         description: Error al eliminar el campo
  */
-router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireAdmin, (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
 
   (async () => {

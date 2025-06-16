@@ -29,16 +29,17 @@ const JWT_SECRET = 'your_jwt_secret_key';
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - password
  *             properties:
  *               name:
  *                 type: string
- *                 description: Nombre del usuario
  *               email:
  *                 type: string
- *                 description: Correo electrónico del usuario
  *               password:
  *                 type: string
- *                 description: Contraseña del usuario
  *     responses:
  *       201:
  *         description: Usuario registrado correctamente
@@ -54,7 +55,10 @@ router.post(
   [
     body('name').notEmpty().withMessage('El nombre es obligatorio'),
     body('email').isEmail().withMessage('Debe ser un email válido'),
-    body('password').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres'),
+    body('password')
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/[A-Z]/).withMessage('Debe tener al menos una mayúscula')
+      .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Debe tener al menos un símbolo'),
   ],
   async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
@@ -117,13 +121,14 @@ router.post(
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - email
+ *               - password
  *             properties:
  *               email:
  *                 type: string
- *                 description: Correo electrónico del usuario
  *               password:
  *                 type: string
- *                 description: Contraseña del usuario
  *     responses:
  *       200:
  *         description: Inicio de sesión exitoso

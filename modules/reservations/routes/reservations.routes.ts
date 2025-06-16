@@ -1,10 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
-
+import { body, validationResult } from 'express-validator';
 
 /**
  * @swagger
@@ -38,8 +38,8 @@ router.use(authenticateToken, checkJwtBlacklist);
  *         description: Error al obtener las reservas
  */
 
-// Ruta para obtener todas las reservas con paginación
-router.get('/', async (req: Request, res: Response) => {
+// Solo admin puede ver todas las reservas
+router.get('/', requireAdmin, async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
 
@@ -126,11 +126,9 @@ function isWeekend(dateStr: string) {
  *                 type: array
  *                 items:
  *                   type: integer
- *               quantities:
- *                 type: array
- *                 items:
- *                   type: integer
- *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
+ *               quantity:
+ *                 type: integer
+ *                 description: Cantidad de plazas a reservar (debe ser un número entero positivo)
  *     responses:
  *       201:
  *         description: Reserva creada correctamente
@@ -154,109 +152,116 @@ function isWeekend(dateStr: string) {
  */
 
 // Nueva ruta para crear una reserva con slots y validación de usuarios máximos
-router.post('/', function (req: Request, res: Response, next: NextFunction) {
-  (async () => {
-    const { field_id, date, slot, user_ids, quantities } = req.body;
+router.post('/',
+  [
+    body('field_id').isInt({ min: 1 }).withMessage('Campo inválido'),
+    body('date').notEmpty().withMessage('La fecha es obligatoria').isISO8601().withMessage('Fecha inválida'),
+    body('slot').isInt({ min: 1, max: 4 }).withMessage('Slot horario inválido'),
+    body('total_price').isFloat({ min: 1 }).withMessage('El precio debe ser mayor que 0'),
+    body('user_ids').isArray({ min: 1 }).withMessage('Debe haber al menos un usuario'),
+    body('quantity').isInt({ min: 1 }).withMessage('La cantidad debe ser un número entero positivo'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    (async () => {
+      const { field_id, date, slot, user_ids, quantity } = req.body;
 
-    if (!Array.isArray(user_ids) || user_ids.length === 0) {
-      res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
-      return;
-    }
-    if (!date || !slot) {
-      res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
-      return;
-    }
-    if (!isWeekend(date)) {
-      res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
-      return;
-    }
-    const slotObj = SLOTS.find(s => s.id === Number(slot));
-    if (!slotObj) {
-      res.status(400).json({ message: 'Slot no válido' });
-      return;
-    }
-    // Calcular start_time y end_time
-    const start_time = `${date} ${slotObj.start}:00`;
-    const end_time = `${date} ${slotObj.end}:00`;
-
-    try {
-      const connection = await pool.getConnection();
-      // 1. Obtener el tipo de campo y el precio
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        'SELECT type, price_per_hour FROM fields WHERE id = ?',
-        [field_id]
-      );
-      if (fieldRows.length === 0) {
-        connection.release();
-        res.status(404).json({ message: 'Campo no encontrado' });
+      if (!Array.isArray(user_ids) || user_ids.length === 0) {
+        res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
         return;
       }
-      const fieldType = fieldRows[0].type;
-      const pricePerHour = Number(fieldRows[0].price_per_hour);
-      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // 2. Contar plazas ya reservadas para ese campo, fecha y slot (de todas las reservas en ese slot)
-      const [userCountRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
-          JOIN reservation_users ru ON ru.reservation_id = r.id
-          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
-        [field_id, date, slot]
-      );
-      const currentUsers = Number(userCountRows[0]?.count) || 0;
-      // 3. Calcular plazas a reservar (usando quantities correctamente)
-      let plazasNuevas = 0;
-      const userCountMap: Record<number, number> = {};
-      for (let i = 0; i < user_ids.length; i++) {
-        const userId = user_ids[i];
-        const qty = quantities && quantities[i] ? Number(quantities[i]) : 1;
-        plazasNuevas += qty;
-        userCountMap[userId] = (userCountMap[userId] || 0) + qty;
+      if (!date || !slot) {
+        res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
+        return;
       }
-      // Calcular el precio total según plazas reservadas y precio del campo
-      const total_price = plazasNuevas * pricePerHour;
-      if (currentUsers + plazasNuevas > maxUsers) {
-        connection.release();
-        return res.status(400).json({
-          message: `No hay suficientes plazas disponibles para este campo, día y slot. Quedan: ${maxUsers - currentUsers}`
-        });
+      if (!isWeekend(date)) {
+        res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
+        return;
       }
-      // 4. Crear la reserva (agrupada: una reserva con N plazas para ese usuario)
-      const [result] = await connection.query<OkPacket>(
-        'INSERT INTO reservations (field_id, start_time, end_time, date, slot, total_price) VALUES (?, ?, ?, ?, ?, ?)',
-        [field_id, start_time, end_time, date, slot, total_price]
-      );
-      const reservationId = result.insertId;
-      // 5. Insertar usuarios asociados en la tabla intermedia (con cantidad de plazas)
-      // Debe haber solo una fila por usuario por reserva, con la cantidad total
-      const userQuantityMap: Record<number, number> = {};
-      for (let i = 0; i < user_ids.length; i++) {
-        const userId = user_ids[i];
-        let quantity = 1;
-        if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
-          quantity = Number(quantities[i]);
-        }
-        userQuantityMap[userId] = (userQuantityMap[userId] || 0) + quantity;
+      const slotObj = SLOTS.find(s => s.id === Number(slot));
+      if (!slotObj) {
+        res.status(400).json({ message: 'Slot no válido' });
+        return;
       }
-      for (const userIdStr of Object.keys(userQuantityMap)) {
-        const userId = Number(userIdStr);
-        await connection.query(
-          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
-          [reservationId, userId, userQuantityMap[userId]]
+      // Calcular start_time y end_time
+      const start_time = `${date} ${slotObj.start}:00`;
+      const end_time = `${date} ${slotObj.end}:00`;
+
+      try {
+        const connection = await pool.getConnection();
+        // 1. Obtener el tipo de campo y el precio
+        const [fieldRows] = await connection.query<RowDataPacket[]>(
+          'SELECT type, price_per_hour FROM fields WHERE id = ?',
+          [field_id]
         );
+        if (fieldRows.length === 0) {
+          connection.release();
+          res.status(404).json({ message: 'Campo no encontrado' });
+          return;
+        }
+        const fieldType = fieldRows[0].type;
+        const pricePerHour = Number(fieldRows[0].price_per_hour);
+        const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+        // 2. Contar plazas ya reservadas para ese campo, fecha y slot (de todas las reservas en ese slot)
+        const [userCountRows] = await connection.query<RowDataPacket[]>(
+          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+            LEFT JOIN reservation_users ru ON ru.reservation_id = r.id
+            WHERE r.field_id = ? AND date(r.start_time) = ? AND r.slot = ?`,
+          [field_id, date, slot]
+        );
+        const currentUsers = Number(userCountRows[0]?.count) || 0;
+        // 3. Calcular plazas a reservar (usar quantity directamente, no user_ids.length)
+        const plazasNuevas = Number(quantity) || user_ids.length;
+        // Calcular el precio total según plazas reservadas y precio del campo
+        const total_price = plazasNuevas * pricePerHour;
+        if (currentUsers + plazasNuevas > maxUsers) {
+          connection.release();
+          return res.status(400).json({
+            message: `No hay suficientes plazas disponibles para este campo, día y slot. Quedan: ${maxUsers - currentUsers}`
+          });
+        }
+        // 4. Crear la reserva (agrupada: una reserva con N plazas para ese usuario)
+        const [result] = await connection.query<OkPacket>(
+          'INSERT INTO reservations (field_id, start_time, end_time, date, slot, total_price) VALUES (?, ?, ?, ?, ?, ?)',
+          [field_id, start_time, end_time, date, slot, total_price]
+        );
+        const reservationId = result.insertId;
+        // 5. Insertar usuarios asociados en la tabla intermedia (con cantidad de plazas)
+        // Agrupar por usuario: si hay varios iguales, sumar la cantidad
+        const userQuantityMap: Record<number, number> = {};
+        for (const userId of user_ids) {
+          userQuantityMap[userId] = (userQuantityMap[userId] || 0) + 1;
+        }
+        // Si solo hay un usuario, asignar la cantidad total
+        if (user_ids.length === 1) {
+          userQuantityMap[user_ids[0]] = plazasNuevas;
+        }
+        for (const userIdStr of Object.keys(userQuantityMap)) {
+          const userId = Number(userIdStr);
+          await connection.query(
+            'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
+            [reservationId, userId, userQuantityMap[userId]]
+          );
+        }
+        connection.release();
+        res.status(201).json({
+          message: 'Reserva creada correctamente',
+          reservationId,
+          plazasDisponibles: maxUsers - (currentUsers + plazasNuevas),
+          maxUsers,
+          plazasReservadas: currentUsers + plazasNuevas
+        });
+      } catch (error) {
+        console.error('Error al crear la reserva:', error);
+        res.status(500).json({ message: 'Error al crear la reserva' });
       }
-      connection.release();
-      res.status(201).json({
-        message: 'Reserva creada correctamente',
-        reservationId,
-        plazasDisponibles: maxUsers - (currentUsers + plazasNuevas),
-        maxUsers,
-        plazasReservadas: currentUsers + plazasNuevas
-      });
-    } catch (error) {
-      console.error('Error al crear la reserva:', error);
-      res.status(500).json({ message: 'Error al crear la reserva' });
-    }
-  })().catch(next);
-});
+    })().catch(next);
+  }
+);
 
 /**
  * @swagger
@@ -293,11 +298,9 @@ router.post('/', function (req: Request, res: Response, next: NextFunction) {
  *                 type: array
  *                 items:
  *                   type: integer
- *               quantities:
- *                 type: array
- *                 items:
- *                   type: integer
- *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
+ *               quantity:
+ *                 type: integer
+ *                 description: Cantidad de plazas a reservar (debe ser un número entero positivo)
  *     responses:
  *       200:
  *         description: Reserva actualizada correctamente
@@ -308,96 +311,112 @@ router.post('/', function (req: Request, res: Response, next: NextFunction) {
  */
 
 // Ruta para actualizar una reserva existente (solo datos de la reserva, no usuarios)
-router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
-  (async () => {
-    const { id } = req.params;
-    const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
+router.put('/:id',
+  requireAdmin,
+  [
+    body('field_id').optional().isInt({ min: 1 }).withMessage('Campo inválido'),
+    body('date').optional().isISO8601().withMessage('Fecha inválida'),
+    body('slot').optional().isInt({ min: 1, max: 4 }).withMessage('Slot horario inválido'),
+    body('total_price').optional().isFloat({ min: 1 }).withMessage('El precio debe ser mayor que 0'),
+    body('user_ids').optional().isArray({ min: 1 }).withMessage('Debe haber al menos un usuario'),
+    body('quantity').optional().isInt({ min: 1 }).withMessage('La cantidad debe ser un número entero positivo'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    (async () => {
+      const { id } = req.params;
+      const { field_id, date, slot, total_price, user_ids, quantity } = req.body;
 
-    if (!date || !slot) {
-      res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
-      return;
-    }
-    if (!isWeekend(date)) {
-      res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
-      return;
-    }
-    const slotObj = SLOTS.find(s => s.id === Number(slot));
-    if (!slotObj) {
-      res.status(400).json({ message: 'Slot no válido' });
-      return;
-    }
-    const start_time = `${date} ${slotObj.start}:00`;
-    const end_time = `${date} ${slotObj.end}:00`;
-
-    try {
-      const connection = await pool.getConnection();
-      // Validar campo
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        'SELECT type FROM fields WHERE id = ?',
-        [field_id]
-      );
-      if (fieldRows.length === 0) {
-        connection.release();
-        res.status(404).json({ message: 'Campo no encontrado' });
+      if (!date || !slot) {
+        res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
         return;
       }
-      const fieldType = fieldRows[0].type;
-      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // Validar usuarios si se pasan
-      let currentUsers = 0;
-      if (Array.isArray(user_ids)) {
-        const [userCountRows] = await connection.query<RowDataPacket[]>(
-          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
-            JOIN reservation_users ru ON ru.reservation_id = r.id
-            WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
-          [field_id, date, start_time, id]
+      if (!isWeekend(date)) {
+        res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
+        return;
+      }
+      const slotObj = SLOTS.find(s => s.id === Number(slot));
+      if (!slotObj) {
+        res.status(400).json({ message: 'Slot no válido' });
+        return;
+      }
+      const start_time = `${date} ${slotObj.start}:00`;
+      const end_time = `${date} ${slotObj.end}:00`;
+
+      try {
+        const connection = await pool.getConnection();
+        // Validar campo
+        const [fieldRows] = await connection.query<RowDataPacket[]>(
+          'SELECT type FROM fields WHERE id = ?',
+          [field_id]
         );
-        currentUsers = userCountRows[0]?.count || 0;
-        // Calcular plazas a reservar
-        let plazasNuevas = 0;
-        const userCountMap: Record<number, number> = {};
-        for (let i = 0; i < user_ids.length; i++) {
-          const userId = user_ids[i];
-          // Usar quantities del body, si existe, si no por defecto 1
-          let quantity = 1;
-          if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
-            quantity = Number(quantities[i]);
-          }
-          userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
-          plazasNuevas += quantity;
-        }
-        if (currentUsers + plazasNuevas > maxUsers) {
+        if (fieldRows.length === 0) {
           connection.release();
-          res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+          res.status(404).json({ message: 'Campo no encontrado' });
           return;
         }
-      }
-      // Actualizar reserva
-      const [result] = await connection.query<OkPacket>(
-        'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, date = ?, slot = ?, total_price = ? WHERE id = ?',
-        [field_id, start_time, end_time, date, slot, total_price, id]
-      );
-      // Si se pasan usuarios, actualizar tabla intermedia
-      if (Array.isArray(user_ids)) {
-        await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
-        for (const userId of user_ids) {
-          await connection.query(
-            'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-            [id, userId]
+        const fieldType = fieldRows[0].type;
+        const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+        // Validar usuarios si se pasan
+        let currentUsers = 0;
+        if (Array.isArray(user_ids)) {
+          const [userCountRows] = await connection.query<RowDataPacket[]>(
+            `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+              JOIN reservation_users ru ON ru.reservation_id = r.id
+              WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
+            [field_id, date, start_time, id]
           );
+          currentUsers = userCountRows[0]?.count || 0;
+          // Calcular plazas a reservar
+          let plazasNuevas = 0;
+          const userCountMap: Record<number, number> = {};
+          for (let i = 0; i < user_ids.length; i++) {
+            const userId = user_ids[i];
+            // Usar quantity del body, si existe, si no por defecto 1
+            let quantity = 1;
+            if (quantity && quantity > 0) {
+              quantity = Number(quantity);
+            }
+            userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
+            plazasNuevas += quantity;
+          }
+          if (currentUsers + plazasNuevas > maxUsers) {
+            connection.release();
+            res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+            return;
+          }
         }
+        // Actualizar reserva
+        const [result] = await connection.query<OkPacket>(
+          'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, date = ?, slot = ?, total_price = ? WHERE id = ?',
+          [field_id, start_time, end_time, date, slot, total_price, id]
+        );
+        // Si se pasan usuarios, actualizar tabla intermedia
+        if (Array.isArray(user_ids)) {
+          await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
+          for (const userId of user_ids) {
+            await connection.query(
+              'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
+              [id, userId]
+            );
+          }
+        }
+        connection.release();
+        if (result.affectedRows === 0) {
+          return res.status(404).json({ message: 'Reserva no encontrada' });
+        }
+        res.json({ message: 'Reserva actualizada correctamente' });
+      } catch (error) {
+        console.error('Error al actualizar la reserva:', error);
+        res.status(500).json({ message: 'Error al actualizar la reserva' });
       }
-      connection.release();
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ message: 'Reserva no encontrada' });
-      }
-      res.json({ message: 'Reserva actualizada correctamente' });
-    } catch (error) {
-      console.error('Error al actualizar la reserva:', error);
-      res.status(500).json({ message: 'Error al actualizar la reserva' });
-    }
-  })().catch(next);
-});
+    })().catch(next);
+  }
+);
 
 /**
  * @swagger
@@ -442,17 +461,30 @@ router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
  *       500:
  *         description: Error al actualizar la reserva
  */
-router.patch('/:id', function (req: Request, res: Response, next: NextFunction) {
-  (async () => {
-    const { id } = req.params;
-    const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
-
-    if ((date && !slot) || (!date && slot)) {
-      res.status(400).json({ message: 'Si actualizas la fecha o el slot, debes proporcionar ambos' });
+router.patch('/:id',
+  requireAdmin,
+  [
+    body('field_id').optional().isInt({ min: 1 }).withMessage('Campo inválido'),
+    body('date').optional().isISO8601().withMessage('Fecha inválida'),
+    body('slot').optional().isInt({ min: 1, max: 4 }).withMessage('Slot horario inválido'),
+    body('total_price').optional().isFloat({ min: 1 }).withMessage('El precio debe ser mayor que 0'),
+    body('user_ids').optional().isArray({ min: 1 }).withMessage('Debe haber al menos un usuario'),
+    body('quantity').optional().isInt({ min: 1 }).withMessage('La cantidad debe ser un número entero positivo'),
+  ],
+  function (req: Request, res: Response, next: NextFunction) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
       return;
     }
-    let start_time, end_time;
-    if (date && slot) {
+    (async () => {
+      const { id } = req.params;
+      const { field_id, date, slot, total_price, user_ids, quantity } = req.body;
+
+      if (!date || !slot) {
+        res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
+        return;
+      }
       if (!isWeekend(date)) {
         res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
         return;
@@ -462,79 +494,79 @@ router.patch('/:id', function (req: Request, res: Response, next: NextFunction) 
         res.status(400).json({ message: 'Slot no válido' });
         return;
       }
-      start_time = `${date} ${slotObj.start}:00`;
-      end_time = `${date} ${slotObj.end}:00`;
-    }
+      const start_time = `${date} ${slotObj.start}:00`;
+      const end_time = `${date} ${slotObj.end}:00`;
 
-    try {
-      const connection = await pool.getConnection();
-      // Validar campo
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        'SELECT type FROM fields WHERE id = ?',
-        [field_id]
-      );
-      if (fieldRows.length === 0) {
-        connection.release();
-        res.status(404).json({ message: 'Campo no encontrado' });
-        return;
-      }
-      const fieldType = fieldRows[0].type;
-      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // Validar usuarios si se pasan
-      let currentUsers = 0;
-      if (Array.isArray(user_ids)) {
-        const [userCountRows] = await connection.query<RowDataPacket[]>(
-          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
-            JOIN reservation_users ru ON ru.reservation_id = r.id
-            WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
-          [field_id, date, start_time, id]
+      try {
+        const connection = await pool.getConnection();
+        // Validar campo
+        const [fieldRows] = await connection.query<RowDataPacket[]>(
+          'SELECT type FROM fields WHERE id = ?',
+          [field_id]
         );
-        currentUsers = userCountRows[0]?.count || 0;
-        // Calcular plazas a reservar
-        let plazasNuevas = 0;
-        const userCountMap: Record<number, number> = {};
-        for (let i = 0; i < user_ids.length; i++) {
-          const userId = user_ids[i];
-          // Usar quantities del body, si existe, si no por defecto 1
-          let quantity = 1;
-          if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
-            quantity = Number(quantities[i]);
-          }
-          userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
-          plazasNuevas += quantity;
-        }
-        if (currentUsers + plazasNuevas > maxUsers) {
+        if (fieldRows.length === 0) {
           connection.release();
-          res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+          res.status(404).json({ message: 'Campo no encontrado' });
           return;
         }
-      }
-      // Actualizar reserva
-      const [result] = await connection.query<OkPacket>(
-        'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, date = ?, slot = ?, total_price = ? WHERE id = ?',
-        [field_id, start_time, end_time, date, slot, total_price, id]
-      );
-      // Si se pasan usuarios, actualizar tabla intermedia
-      if (Array.isArray(user_ids)) {
-        await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
-        for (const userId of user_ids) {
-          await connection.query(
-            'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-            [id, userId]
+        const fieldType = fieldRows[0].type;
+        const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+        // Validar usuarios si se pasan
+        let currentUsers = 0;
+        if (Array.isArray(user_ids)) {
+          const [userCountRows] = await connection.query<RowDataPacket[]>(
+            `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+              JOIN reservation_users ru ON ru.reservation_id = r.id
+              WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
+            [field_id, date, start_time, id]
           );
+          currentUsers = userCountRows[0]?.count || 0;
+          // Calcular plazas a reservar
+          let plazasNuevas = 0;
+          const userCountMap: Record<number, number> = {};
+          for (let i = 0; i < user_ids.length; i++) {
+            const userId = user_ids[i];
+            // Usar quantity del body, si existe, si no por defecto 1
+            let quantity = 1;
+            if (quantity && quantity > 0) {
+              quantity = Number(quantity);
+            }
+            userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
+            plazasNuevas += quantity;
+          }
+          if (currentUsers + plazasNuevas > maxUsers) {
+            connection.release();
+            res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+            return;
+          }
         }
+        // Actualizar reserva
+        const [result] = await connection.query<OkPacket>(
+          'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, date = ?, slot = ?, total_price = ? WHERE id = ?',
+          [field_id, start_time, end_time, date, slot, total_price, id]
+        );
+        // Si se pasan usuarios, actualizar tabla intermedia
+        if (Array.isArray(user_ids)) {
+          await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
+          for (const userId of user_ids) {
+            await connection.query(
+              'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
+              [id, userId]
+            );
+          }
+        }
+        connection.release();
+        if (result.affectedRows === 0) {
+          return res.status(404).json({ message: 'Reserva no encontrada' });
+        }
+        res.json({ message: 'Reserva actualizada correctamente' });
+      } catch (error) {
+        console.error('Error al actualizar la reserva:', error);
+        res.status(500).json({ message: 'Error al actualizar la reserva' });
       }
-      connection.release();
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ message: 'Reserva no encontrada' });
-      }
-      res.json({ message: 'Reserva actualizada correctamente' });
-    } catch (error) {
-      console.error('Error al actualizar la reserva:', error);
-      res.status(500).json({ message: 'Error al actualizar la reserva' });
-    }
-  })().catch(next);
-});
+    })().catch(next);
+  }
+);
 
 /**
  * @swagger
@@ -720,7 +752,7 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
  */
 
 // Ruta para eliminar una reserva
-router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireAdmin, (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
 
   (async () => {
