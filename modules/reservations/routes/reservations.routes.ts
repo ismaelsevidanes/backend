@@ -625,6 +625,11 @@ router.patch('/:id',
  *         schema:
  *           type: integer
  *         description: Máximo número de plazas/reservas
+ *       - in: query
+ *         name: ordenarPorFecha
+ *         schema:
+ *           type: boolean
+ *         description: Ordenar por fecha/hora más cercana
  *     responses:
  *       200:
  *         description: Lista de reservas del usuario
@@ -645,52 +650,52 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
       const pageSize = parseInt((req.query.pageSize as string) || '10', 10);
       const offset = (page - 1) * pageSize;
       // Filtros
-      const { precioMin, precioMax, ubicacion, localidad, fecha, numReservasMin, numReservasMax } = req.query;
+      const { precioMin, precioMax, ubicacion, localidad, fecha, numReservasMin, numReservasMax, ordenarPorFecha } = req.query;
       let whereClauses: string[] = ["ru.user_id = ?"];
       let params: any[] = [userId];
-      if (precioMin) {
-        whereClauses.push('r.total_price >= ?');
-        params.push(Number(precioMin));
-      }
-      if (precioMax) {
-        whereClauses.push('r.total_price <= ?');
-        params.push(Number(precioMax));
-      }
-      if (ubicacion) {
-        whereClauses.push('(LOWER(f.address) LIKE ? OR LOWER(f.name) LIKE ?)');
-        params.push(`%${ubicacion.toString().toLowerCase()}%`);
-        params.push(`%${ubicacion.toString().toLowerCase()}%`);
-      }
-      if (localidad) {
-        whereClauses.push('LOWER(f.location) LIKE ?');
-        params.push(`%${localidad.toString().toLowerCase()}%`);
-      }
-      // El filtro de fecha ahora solo ordena, no filtra
+      if (precioMin) { whereClauses.push('r.total_price >= ?'); params.push(Number(precioMin)); }
+      if (precioMax) { whereClauses.push('r.total_price <= ?'); params.push(Number(precioMax)); }
+      if (ubicacion) { whereClauses.push('(LOWER(f.address) LIKE ? OR LOWER(f.name) LIKE ?)'); params.push(`%${ubicacion.toString().toLowerCase()}%`, `%${ubicacion.toString().toLowerCase()}%`); }
+      if (localidad) { whereClauses.push('LOWER(f.location) LIKE ?'); params.push(`%${localidad.toString().toLowerCase()}%`); }
+      let havingClauses: string[] = [];
+      if (numReservasMin) { havingClauses.push('SUM(ru.quantity) >= ?'); params.push(Number(numReservasMin)); }
+      if (numReservasMax) { havingClauses.push('SUM(ru.quantity) <= ?'); params.push(Number(numReservasMax)); }
       let orderBy = 'ORDER BY r.start_time DESC';
+      if (String(ordenarPorFecha) === 'true' || String(ordenarPorFecha) === '1') {
+        orderBy = 'ORDER BY r.start_time ASC';
+      }
+      // El filtro de fecha solo filtra, no ordena
       if (fecha) {
-        orderBy = 'ORDER BY ABS(DATEDIFF(DATE(r.start_time), ?)) ASC, r.start_time DESC';
+        whereClauses.push('DATE(r.start_time) = ?');
         params.push(fecha);
       }
       const where = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+      const having = havingClauses.length ? 'HAVING ' + havingClauses.join(' AND ') : '';
       const connection = await pool.getConnection();
       // Total de reservas filtradas
       const [totalResult] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) as total FROM reservation_users ru
-         JOIN reservations r ON r.id = ru.reservation_id
-         JOIN fields f ON r.field_id = f.id
-         ${where}`,
+        `SELECT COUNT(*) as total FROM (
+          SELECT r.id FROM reservation_users ru
+          JOIN reservations r ON r.id = ru.reservation_id
+          JOIN fields f ON r.field_id = f.id
+          ${where}
+          GROUP BY r.id
+          ${having}
+        ) as sub`,
         params
       );
       const totalReservations = totalResult[0]?.total || 0;
       const totalPages = Math.ceil(totalReservations / pageSize);
       // Buscar las reservas filtradas
       const [reservations] = await connection.query<RowDataPacket[]>(
-        `SELECT r.*, f.name as fieldName, f.address as fieldAddress, f.location as fieldLocation, ru.quantity, DATE(r.start_time) as date, r.slot,
+        `SELECT r.*, f.name as fieldName, f.address as fieldAddress, f.location as fieldLocation, SUM(ru.quantity) as quantity, DATE(r.start_time) as date, r.slot,
           (SELECT user_id FROM reservation_users WHERE reservation_id = r.id ORDER BY user_id ASC LIMIT 1) as creator_id
           FROM reservations r
           JOIN reservation_users ru ON r.id = ru.reservation_id
           JOIN fields f ON r.field_id = f.id
           ${where}
+          GROUP BY r.id
+          ${having}
           ${orderBy}
           LIMIT ? OFFSET ?`,
         [...params, pageSize, offset]

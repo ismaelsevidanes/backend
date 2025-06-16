@@ -44,13 +44,13 @@ que los inputs al completar pase al siguiente de forma automatica
 
 Cosas  A realizar importantes Mañana:
 
-- Validaciones de todos los campos tanto en back/front como en la vista administrador
-- Implementar la vista administrador y que todo funcione
+- Implementar la vista administrador y que todo funcione y tenga validaciones como el back y front
 - Poner fotos reales de los campos almenos los primeros 6
-
 - Documentar y hacer comentarios en todo el codigo
 - Ordenar los ficheros en carpetas y globalizar estilos, botones y todo eso
+
 - Realizar El figma completo
 - Realizar la guia de instalacion en el Readme
 - Realizar la presentacion completa
 - Actualizar la memoria de proyecto
+- Poner en el despliegue la imagen del docker
