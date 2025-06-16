@@ -639,3 +639,5 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
 });
 
 export default router;
+
+// Rutas para gestión de campos de fútbol (CRUD, filtros, solo admin para crear/editar/eliminar)

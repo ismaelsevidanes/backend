@@ -1,6 +1,6 @@
-// Modelo para la tabla intermedia reservation_users
+// Modelo para la relación usuario-reserva (tabla intermedia)
 export interface ReservationUser {
-  reservationId: number;
-  userId: number;
-  quantity: number;
+  reservationId: number; // ID de la reserva
+  userId: number; // ID del usuario
+  quantity: number; // Plazas reservadas por el usuario
 }

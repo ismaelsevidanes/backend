@@ -202,6 +202,8 @@ const paymentValidations = [
  *         description: Error al obtener los métodos de pago
  */
 
+// Rutas para gestión de métodos de pago guardados (añadir, obtener, eliminar)
+
 // Todas las rutas requieren autenticación
 router.use(authenticateToken);
 

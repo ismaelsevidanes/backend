@@ -2,6 +2,8 @@ import 'dotenv/config';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 
+// Script para insertar datos de ejemplo en la base de datos (usuarios, campos, etc)
+
 async function seedDatabase() {
   // Usa process.env.DB_HOST si está definida, si no, usa 'localhost'
   const dbHost = process.env.DB_HOST || 'localhost';
@@ -66,41 +68,6 @@ async function seedDatabase() {
       location = VALUES(location),
       price_per_hour = VALUES(price_per_hour),
       images = VALUES(images);
-    `);
-
-    // Insertar o actualizar datos en la tabla 'reservations'
-    await connection.query(`
-      INSERT INTO reservations (id, field_id, start_time, end_time, date, slot, total_price) VALUES
-      (1, 1, '2025-05-03 09:00:00', '2025-05-03 10:30:00', '2025-05-03', 1, 100.00),
-      (2, 2, '2025-05-04 10:30:00', '2025-05-04 12:00:00', '2025-05-04', 2, 80.00)
-      ON DUPLICATE KEY UPDATE
-      field_id = VALUES(field_id),
-      start_time = VALUES(start_time),
-      end_time = VALUES(end_time),
-      date = VALUES(date),
-      slot = VALUES(slot),
-      total_price = VALUES(total_price);
-    `);
-
-    // Insertar usuarios asociados a reservas (tabla intermedia)
-    await connection.query(`
-      INSERT INTO reservation_users (reservation_id, user_id) VALUES
-      (1, 1),
-      (1, 2),
-      (2, 2)
-      ON DUPLICATE KEY UPDATE user_id = VALUES(user_id);
-    `);
-
-    // Insertar o actualizar datos en la tabla 'payments'
-    await connection.query(`
-      INSERT INTO payments (id, reservation_id, amount, payment_method, paid_at) VALUES
-      (1, 1, 100.00, 'Credit Card', '2025-05-03 12:30:00'),
-      (2, 2, 80.00, 'PayPal', '2025-05-04 17:30:00')
-      ON DUPLICATE KEY UPDATE
-      reservation_id = VALUES(reservation_id),
-      amount = VALUES(amount),
-      payment_method = VALUES(payment_method),
-      paid_at = VALUES(paid_at);
     `);
 
     console.log('Datos iniciales insertados o actualizados correctamente.');

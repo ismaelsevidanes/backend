@@ -612,3 +612,5 @@ router.patch('/me',
 
 
 export default router;
+
+// Rutas para gestión de usuarios (CRUD, solo admin para algunas acciones)

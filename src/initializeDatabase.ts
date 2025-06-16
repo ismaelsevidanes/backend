@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import pool from '../config/database';
 import 'dotenv/config';
 
+// Script para crear la base de datos y las tablas si no existen
 async function initializeDatabase() {
   try {
     // Usa process.env.DB_HOST si está definida, si no, usa 'localhost'

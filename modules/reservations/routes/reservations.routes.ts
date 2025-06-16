@@ -889,3 +889,5 @@ router.delete('/:id/cancel', function (req: Request, res: Response, next: NextFu
 });
 
 export default router;
+
+// Rutas para gestión de reservas (CRUD, filtros, solo admin para algunas acciones)

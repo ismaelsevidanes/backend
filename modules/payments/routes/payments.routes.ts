@@ -329,3 +329,5 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
 });
 
 export default router;
+
+// Rutas para gestión de pagos y métodos de pago asociados a usuarios

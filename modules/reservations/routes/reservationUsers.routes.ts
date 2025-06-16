@@ -479,3 +479,5 @@ router.delete('/:reservationId/users/:userId', requireAdmin, (req, res, next) =>
 });
 
 export default router;
+
+// Rutas para gestionar usuarios asociados a reservas (añadir, quitar, actualizar cantidad)

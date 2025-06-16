@@ -2,6 +2,7 @@ import pool from '../../../config/database';
 import crypto from 'crypto';
 import type { PaymentMethod } from '../../../shared/models/PaymentMethod';
 
+// Servicio para cifrar, guardar y recuperar métodos de pago de usuario
 class PaymentMethodService {
   private secret = process.env.PAYMENT_SECRET || 'supersecret';
 
