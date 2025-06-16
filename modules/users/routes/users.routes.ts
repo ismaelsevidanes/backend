@@ -40,7 +40,7 @@ router.use(authenticateToken, checkJwtBlacklist);
  */
 // Ruta para obtener todos los usuarios con paginación
 router.get('/', async (req: Request, res: Response) => {
-  console.log('Solicitud recibida en /api/users'); // Log para confirmar que la ruta está siendo alcanzada
+  //console.log('Solicitud recibida en /api/users'); // Log para confirmar que la ruta está siendo alcanzada
   const page = parseInt(req.query.page as string) || 1;
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
 

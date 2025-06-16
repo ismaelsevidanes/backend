@@ -174,5 +174,41 @@ router.delete('/', async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Error al eliminar el método de pago', error });
   }
 });
+/**
+ * @swagger
+ * /api/payment_methods/all:
+ *   get:
+ *     summary: Obtiene todos los métodos de pago (solo admin)
+ *     tags: [PaymentMethod]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de métodos de pago
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PaymentMethod'
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido
+ */
+router.get('/all', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 10;
+    const { data, total } = await paymentMethodService.getAllMethods(page, limit);
+    const totalPages = Math.ceil(total / limit) || 1;
+    res.json({ data, totalPages });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener los métodos de pago', error });
+  }
+});
 
 export default router;
