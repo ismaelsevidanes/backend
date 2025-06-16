@@ -1,5 +1,3 @@
--Las reservas y pagos se eliminen de la bd cada x tiempo ???
-
 -Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas) y globalizacion de estilos, componentes etc
 
 -Documentar Todos los ficheros 
@@ -22,15 +20,9 @@
 
 - En el login, que sea nombre de usuario o correo, en el primer input
 
-- Que se muestren automaticamente los cambios al cambiar de paginacion y de limite de paginacion en el constant
-
-- Crear una vista y funcionalidad para ver las reservas que tiene ese usuario
-
-- Sistema que cuando pasa la fecha de la reserva se resetee y que las plazas son segun el dia y slot horario y no el campo de futbol 
+- La paginacion para lo del adminstrador sea diferente al del contants
 
 -Que al hacer logout en la vista summary ahi si te tiene que redireccionar a login porque es una vista protegida y si haces login con otro usuario no te tendria que llevar a esa vista porque no hizo esa reserva
-
-- Que al hacer login no te redireccione al dashboard si no donde estabas
 
 - Lo des Step en las dos vistas que sea responsive
 
@@ -40,13 +32,9 @@
 
 - Realizar lo demas que sale en la memoria de proyecto
 
-- Que los logos te redireccionen a /dashboard y todo lo que redirecione a / igual
-
--Implementar botones de navegacion y las migas de pan
-
-- Modificar el sistema de reserva y que los plazos disponible sea segun el dia y sus horas aparte del tipo de campo que es como esta
-
 - Cambiar diseño del dashboard y del fielddetail para que la informacion se mas bonita
+
+- El breacrumbs en Metodo de pago y Summary para pasos anteriores no funciona
 
 Vista metodo de pago:
 que tenga validacion tanto en back como en front
@@ -54,3 +42,15 @@ que sea accesible mediante tabulador y enter los label con las opciones
 Mejorar el diseño del circulo del radio
 que los inputs al completar pase al siguiente de forma automatica 
 
+Cosas  A realizar importantes Mañana:
+
+- Validaciones de todos los campos tanto en back/front como en la vista administrador
+- Implementar la vista administrador y que todo funcione
+- Poner fotos reales de los campos almenos los primeros 6
+
+- Documentar y hacer comentarios en todo el codigo
+- Ordenar los ficheros en carpetas y globalizar estilos, botones y todo eso
+- Realizar El figma completo
+- Realizar la guia de instalacion en el Readme
+- Realizar la presentacion completa
+- Actualizar la memoria de proyecto
