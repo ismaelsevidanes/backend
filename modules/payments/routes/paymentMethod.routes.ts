@@ -155,6 +155,52 @@ const paymentValidations = [
  *       500:
  *         description: Error al eliminar el método de pago
  */
+/**
+ * @swagger
+ * /api/payments/method/all:
+ *   get:
+ *     summary: Obtiene todos los métodos de pago de todos los usuarios (solo admin)
+ *     tags: [PaymentMethod]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Tamaño de página
+ *     responses:
+ *       200:
+ *         description: Lista de métodos de pago
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PaymentMethod'
+ *                 total:
+ *                   type: integer
+ *                 totalPages:
+ *                   type: integer
+ *                 currentPage:
+ *                   type: integer
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Acceso denegado
+ *       500:
+ *         description: Error al obtener los métodos de pago
+ */
 
 // Todas las rutas requieren autenticación
 router.use(authenticateToken);
@@ -212,6 +258,34 @@ router.delete('/', async (req: Request, res: Response, next: NextFunction) => {
     res.json({ message: 'Método de pago eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ message: 'Error al eliminar el método de pago', error });
+  }
+});
+
+// Obtener todos los métodos de pago (solo admin)
+router.get('/all', requireAdmin, async (req: Request, res: Response) => {
+  const page = parseInt((req.query.page as string) || '1', 10);
+  const limit = parseInt((req.query.limit as string) || '10', 10);
+  try {
+    // JOIN con users para obtener nombre y email
+    const result = await paymentMethodService.getAllMethodsWithUser(page, limit);
+    const filteredData = result.data.map((item: any) => ({
+      id: item.id,
+      user_id: item.user_id,
+      user_name: item.user_name,
+      user_email: item.user_email,
+      type: item.type,
+      encrypted_data: item.encrypted_data,
+      iv: item.iv,
+      last4: item.last4
+    }));
+    res.json({
+      data: filteredData,
+      total: result.total,
+      totalPages: Math.ceil(result.total / limit),
+      currentPage: page
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener los métodos de pago', error });
   }
 });
 

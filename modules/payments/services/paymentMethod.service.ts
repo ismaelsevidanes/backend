@@ -63,6 +63,32 @@ class PaymentMethodService {
     };
   }
 
+  async getAllMethodsWithUser(page = 1, limit = 10): Promise<{ data: any[]; total: number }> {
+    const offset = (page - 1) * limit;
+    const [rows]: any = await pool.query(
+      `SELECT pm.*, u.name as user_name, u.email as user_email
+       FROM payment_methods pm
+       LEFT JOIN users u ON pm.user_id = u.id
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const [countRows]: any = await pool.query('SELECT COUNT(*) as count FROM payment_methods');
+    const total = countRows[0]?.count || 0;
+    return {
+      data: rows.map((row: any) => ({
+        id: row.id,
+        user_id: row.user_id,
+        user_name: row.user_name,
+        user_email: row.user_email,
+        type: row.type,
+        encrypted_data: row.encrypted_data,
+        iv: row.iv,
+        last4: row.last4
+      })),
+      total,
+    };
+  }
+
   async deleteMethod(userId: number): Promise<void> {
     await pool.query('DELETE FROM payment_methods WHERE user_id = ?', [userId]);
   }

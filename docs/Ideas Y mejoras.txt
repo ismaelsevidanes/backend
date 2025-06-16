@@ -1,22 +1,6 @@
 -Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas) y globalizacion de estilos, componentes etc
 
--Documentar Todos los ficheros 
-
--En el Readme.Md poner guia de instalacion
-
-- Realizar presentacion powerpoint 
-
--Que haya vistas protegidas segun el rol del usuario (el AdminDashboard)
-
 -Implementar en el register y solicitud api de register un confirm password y en la modificacion del usuario
-
--Mejorar validacón contraseña (que tenga 1 simbolo y 1 mayuscula) y validacion de la mayoria de cosas
-
--navegar por las pestañas de admin solo si estas logueado o registrado como administrador(rutas protegidas)
-
--Poner la misma validacion en el frontend del register que el update user del dashboard admin 
-
-- Implementar las validaciones en los actualizar igual, como esta en los crear
 
 - En el login, que sea nombre de usuario o correo, en el primer input
 
@@ -26,23 +10,15 @@
 
 - Lo des Step en las dos vistas que sea responsive
 
-- Tanto en en el componente ReservaForm como en el PaymentSummary otro boton que sea cancelar reserva, que te redirigia al /dashboard
-
--Realizar la vista completa de User Admin con todas las peticiones y que funcione
-
-- Realizar lo demas que sale en la memoria de proyecto
-
 - Cambiar diseño del dashboard y del fielddetail para que la informacion se mas bonita
 
 - El breacrumbs en Metodo de pago y Summary para pasos anteriores no funciona
 
 Vista metodo de pago:
-que tenga validacion tanto en back como en front
 que sea accesible mediante tabulador y enter los label con las opciones
 Mejorar el diseño del circulo del radio
-que los inputs al completar pase al siguiente de forma automatica 
 
-Cosas  A realizar importantes Mañana:
+Cosas  A realizar:
 
 - Implementar la vista administrador y que todo funcione y tenga validaciones como el back y front
 - Poner fotos reales de los campos almenos los primeros 6
