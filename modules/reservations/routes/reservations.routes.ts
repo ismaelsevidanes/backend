@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
@@ -24,6 +24,9 @@ router.use(authenticateToken, checkJwtBlacklist);
  *   get:
  *     summary: Obtiene todas las reservas con paginación
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: query
  *         name: page
@@ -34,12 +37,14 @@ router.use(authenticateToken, checkJwtBlacklist);
  *     responses:
  *       200:
  *         description: Lista de reservas
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al obtener las reservas
  */
-
-// Ruta para obtener todas las reservas con paginación
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireAdmin, async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
 
@@ -104,6 +109,8 @@ function isWeekend(dateStr: string) {
  *     description: >-
  *       El límite de plazas disponibles se calcula por campo, fecha y slot horario. Si ya existen reservas para ese campo, fecha y slot, solo se permitirán tantas plazas como queden libres según el tipo de campo (futbol7=14, futbol11=22).
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -149,11 +156,11 @@ function isWeekend(dateStr: string) {
  *                 message:
  *                   type: string
  *                   example: No hay plazas disponibles para ese campo, fecha y hora
+ *       401:
+ *         description: No autorizado
  *       500:
  *         description: Error al crear la reserva
  */
-
-// Nueva ruta para crear una reserva con slots y validación de usuarios máximos
 router.post('/', function (req: Request, res: Response, next: NextFunction) {
   (async () => {
     const { field_id, date, slot, user_ids, quantities } = req.body;
@@ -264,6 +271,9 @@ router.post('/', function (req: Request, res: Response, next: NextFunction) {
  *   put:
  *     summary: Actualiza una reserva existente (soporta cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: id
@@ -301,14 +311,16 @@ router.post('/', function (req: Request, res: Response, next: NextFunction) {
  *     responses:
  *       200:
  *         description: Reserva actualizada correctamente
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Reserva no encontrada
  *       500:
  *         description: Error al actualizar la reserva
  */
-
-// Ruta para actualizar una reserva existente (solo datos de la reserva, no usuarios)
-router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
+router.put('/:id', requireAdmin, function (req: Request, res: Response, next: NextFunction) {
   (async () => {
     const { id } = req.params;
     const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
@@ -405,6 +417,9 @@ router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
  *   patch:
  *     summary: Actualiza campos específicos de una reserva existente (parcial)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: id
@@ -437,12 +452,16 @@ router.put('/:id', function (req: Request, res: Response, next: NextFunction) {
  *     responses:
  *       200:
  *         description: Reserva actualizada correctamente
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Reserva no encontrada
  *       500:
  *         description: Error al actualizar la reserva
  */
-router.patch('/:id', function (req: Request, res: Response, next: NextFunction) {
+router.patch('/:id', requireAdmin, function (req: Request, res: Response, next: NextFunction) {
   (async () => {
     const { id } = req.params;
     const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
@@ -593,6 +612,12 @@ router.patch('/:id', function (req: Request, res: Response, next: NextFunction) 
  *         schema:
  *           type: integer
  *         description: Máximo número de plazas/reservas
+ *       - in: query
+ *         name: ordenarPorFecha
+ *         schema:
+ *           type: string
+ *           enum: [true, false]
+ *         description: Ordenar por fecha más cercana (true) o por fecha más lejana (false)
  *     responses:
  *       200:
  *         description: Lista de reservas del usuario
@@ -613,7 +638,7 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
       const pageSize = parseInt((req.query.pageSize as string) || '10', 10);
       const offset = (page - 1) * pageSize;
       // Filtros
-      const { precioMin, precioMax, ubicacion, localidad, fecha, numReservasMin, numReservasMax } = req.query;
+      const { precioMin, precioMax, ubicacion, localidad, fecha, numReservasMin, numReservasMax, ordenarPorFecha } = req.query;
       let whereClauses: string[] = ["ru.user_id = ?"];
       let params: any[] = [userId];
       if (precioMin) {
@@ -626,6 +651,7 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
       }
       if (ubicacion) {
         whereClauses.push('(LOWER(f.address) LIKE ? OR LOWER(f.name) LIKE ?)');
+
         params.push(`%${ubicacion.toString().toLowerCase()}%`);
         params.push(`%${ubicacion.toString().toLowerCase()}%`);
       }
@@ -633,9 +659,19 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
         whereClauses.push('LOWER(f.location) LIKE ?');
         params.push(`%${localidad.toString().toLowerCase()}%`);
       }
+      if (numReservasMin) {
+        whereClauses.push('ru.quantity >= ?');
+        params.push(Number(numReservasMin));
+      }
+      if (numReservasMax) {
+        whereClauses.push('ru.quantity <= ?');
+        params.push(Number(numReservasMax));
+      }
       // El filtro de fecha ahora solo ordena, no filtra
       let orderBy = 'ORDER BY r.start_time DESC';
-      if (fecha) {
+      if (ordenarPorFecha === 'true') {
+        orderBy = 'ORDER BY ABS(DATEDIFF(DATE(r.start_time), CURDATE())) ASC, r.start_time DESC';
+      } else if (fecha) {
         orderBy = 'ORDER BY ABS(DATEDIFF(DATE(r.start_time), ?)) ASC, r.start_time DESC';
         params.push(fecha);
       }
@@ -703,6 +739,9 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
  *   delete:
  *     summary: Elimina una reserva existente
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: id
@@ -713,14 +752,16 @@ router.get('/me', function (req: Request, res: Response, next: NextFunction) {
  *     responses:
  *       200:
  *         description: Reserva eliminada correctamente
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Reserva no encontrada
  *       500:
  *         description: Error al eliminar la reserva
  */
-
-// Ruta para eliminar una reserva
-router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireAdmin, (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
 
   (async () => {

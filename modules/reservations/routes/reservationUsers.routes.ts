@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { RowDataPacket, OkPacket } from 'mysql2';
@@ -15,6 +15,9 @@ router.use(authenticateToken, checkJwtBlacklist);
  *   get:
  *     summary: Obtiene los usuarios asociados a una reserva (incluye cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -40,11 +43,15 @@ router.use(authenticateToken, checkJwtBlacklist);
  *                     type: string
  *                   quantity:
  *                     type: integer
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al obtener los usuarios de la reserva
  */
 // GET usuarios de una reserva (ahora incluye quantity)
-router.get('/:reservationId/users', (req, res, next) => {
+router.get('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
     try {
@@ -70,6 +77,9 @@ router.get('/:reservationId/users', (req, res, next) => {
  *   post:
  *     summary: Añade uno o varios usuarios a una reserva existente (soporta cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -98,11 +108,15 @@ router.get('/:reservationId/users', (req, res, next) => {
  *         description: Usuarios añadidos a la reserva
  *       400:
  *         description: Debes proporcionar al menos un usuario
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al añadir usuarios a la reserva
  */
 // POST añadir usuarios a una reserva (ahora soporta quantity)
-router.post('/:reservationId/users', (req, res, next) => {
+router.post('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
     const { user_ids, quantities } = req.body;
@@ -179,6 +193,9 @@ router.post('/:reservationId/users', (req, res, next) => {
  *   put:
  *     summary: Reemplaza todos los usuarios de una reserva (soporta cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -207,11 +224,15 @@ router.post('/:reservationId/users', (req, res, next) => {
  *         description: Usuarios de la reserva actualizados
  *       400:
  *         description: Debes proporcionar un array de usuarios
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
 // PUT reemplazar todos los usuarios de una reserva (soporta quantity)
-router.put('/:reservationId/users', (req, res, next) => {
+router.put('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
     const { user_ids, quantities } = req.body;
@@ -292,6 +313,9 @@ router.put('/:reservationId/users', (req, res, next) => {
  *   patch:
  *     summary: Actualiza usuarios parcialmente de una reserva (Borrar en el Body los campos que no se quieren actualizar)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -313,11 +337,15 @@ router.put('/:reservationId/users', (req, res, next) => {
  *     responses:
  *       200:
  *         description: Usuarios de la reserva actualizados
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
 // PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo por campo, día y slot
-router.patch('/:reservationId/users', (req, res, next) => {
+router.patch('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
     const { add_user_ids, remove_user_ids } = req.body;
@@ -399,6 +427,9 @@ router.patch('/:reservationId/users', (req, res, next) => {
  *   delete:
  *     summary: Elimina un usuario de una reserva (tabla intermedia)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -415,13 +446,17 @@ router.patch('/:reservationId/users', (req, res, next) => {
  *     responses:
  *       200:
  *         description: Usuario eliminado de la reserva
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Usuario no estaba en la reserva
  *       500:
  *         description: Error al eliminar usuario de la reserva
  */
 // DELETE eliminar usuario de una reserva
-router.delete('/:reservationId/users/:userId', (req, res, next) => {
+router.delete('/:reservationId/users/:userId', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId, userId } = req.params;
     try {
