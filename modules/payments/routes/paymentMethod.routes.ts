@@ -1,7 +1,7 @@
-import { Router, Request, Response } from 'express';
-import { body, validationResult } from 'express-validator';
+import { Router, Request, Response, NextFunction } from 'express';
 import paymentMethodService from '../services/paymentMethod.service';
-import { requireAdmin } from '../../../src/middlewares/authMiddleware';
+import { body, validationResult } from 'express-validator';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 
 const router = Router();
 
@@ -16,6 +16,45 @@ function getUserId(req: Request): number | null {
     return null;
   }
 }
+function getUserRole(req: Request): string | null {
+  const auth = req.headers.authorization;
+  if (!auth) return null;
+  try {
+    const token = auth.split(' ')[1];
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+    return payload.role;
+  } catch {
+    return null;
+  }
+}
+
+// Validaciones para método de pago
+const paymentValidations = [
+  body('cardNumber')
+    .isString()
+    .matches(/^[0-9]{16}$/)
+    .withMessage('Número de tarjeta inválido (16 dígitos)'),
+  body('expiry')
+    .isString()
+    .matches(/^(0[1-9]|1[0-2])\/(\d{2})$/)
+    .withMessage('Fecha de expiración inválida (MM/AA)'),
+  body('cvc')
+    .isString()
+    .matches(/^\d{3}$/)
+    .withMessage('CVC inválido (3 dígitos)'),
+  body('cardName')
+    .isString()
+    .isLength({ min: 5, max: 60 })
+    .withMessage('Nombre del titular entre 5 y 60 caracteres'),
+  (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    next();
+  }
+];
 
 /**
  * @swagger
@@ -23,7 +62,6 @@ function getUserId(req: Request): number | null {
  *   name: PaymentMethod
  *   description: Endpoints Relacionados con el metodo de pago (asociado al usuario autenticado)
  */
-
 /**
  * @swagger
  * /api/payments/method:
@@ -46,168 +84,134 @@ function getUserId(req: Request): number | null {
  *             properties:
  *               cardNumber:
  *                 type: string
- *                 pattern: "^\\d{4} \\d{4} \\d{4} \\d{4}$"
- *                 example: '1234 5678 9012 3456'
+ *                 example: '1234567890123456'
+ *                 pattern: '^[0-9]{16}$'
  *               expiry:
  *                 type: string
- *                 pattern: "^(0[1-9]|1[0-2])\\/\\d{2}$"
  *                 example: '08/25'
+ *                 pattern: '^(0[1-9]|1[0-2])/(\\d{2})$'
  *               cvc:
  *                 type: string
- *                 pattern: "^\\d{3}$"
  *                 example: '123'
+ *                 pattern: '^\\d{3}$'
  *               cardName:
  *                 type: string
  *                 example: 'Nombre y Apellidos Completos'
+ *                 minLength: 5
+ *                 maxLength: 60
  *     responses:
  *       200:
  *         description: Método guardado correctamente
  *       400:
- *         description: Faltan datos o validación incorrecta
+ *         description: Faltan datos o datos inválidos
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Acceso denegado
+ *       500:
+ *         description: Error al guardar el método de pago
  *   get:
- *     summary: Obtiene el método de pago guardado del usuario autenticado o de cualquier usuario (admin)
+ *     summary: Obtiene el método de pago guardado del usuario autenticado
  *     tags: [PaymentMethod]
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - name: userId
- *         in: query
- *         required: false
+ *       - in: query
+ *         name: userId
  *         schema:
  *           type: integer
- *         description: "Solo admin: ver método de pago de otro usuario"
+ *         description: Solo admin, consultar método de otro usuario
  *     responses:
  *       200:
  *         description: Método de pago encontrado
  *       401:
  *         description: No autorizado
  *       403:
- *         description: Prohibido
+ *         description: Acceso denegado
  *       404:
  *         description: No hay método guardado
+ *       500:
+ *         description: Error al obtener el método de pago
  *   delete:
- *     summary: Elimina el método de pago guardado del usuario autenticado o de cualquier usuario (admin)
+ *     summary: Elimina el método de pago guardado del usuario autenticado
  *     tags: [PaymentMethod]
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - name: userId
- *         in: query
- *         required: false
+ *       - in: query
+ *         name: userId
  *         schema:
  *           type: integer
- *         description: "Solo admin: eliminar método de pago de otro usuario"
+ *         description: Solo admin, eliminar método de otro usuario
  *     responses:
  *       200:
  *         description: Método de pago eliminado
  *       401:
  *         description: No autorizado
  *       403:
- *         description: Prohibido
+ *         description: Acceso denegado
  *       404:
  *         description: No hay método guardado
+ *       500:
+ *         description: Error al eliminar el método de pago
  */
+
+// Todas las rutas requieren autenticación
+router.use(authenticateToken);
+
 // Guardar método de pago
-router.post('/',
-  [
-    body('cardNumber')
-      .matches(/^\d{4} \d{4} \d{4} \d{4}$/)
-      .withMessage('El número de tarjeta debe tener el formato 1234 5678 9012 3456'),
-    body('expiry').matches(/^(0[1-9]|1[0-2])\/\d{2}$/).withMessage('Fecha de expiración inválida (MM/YY)'),
-    body('cvc').isLength({ min: 3, max: 3 }).withMessage('El CVC debe tener exactamente 3 dígitos').matches(/^\d{3}$/).withMessage('El CVC debe ser numérico de 3 dígitos'),
-    body('cardName').notEmpty().withMessage('El nombre de la tarjeta es obligatorio'),
-  ],
-  async (req: Request, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-    const userId = getUserId(req);
-    if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
-    const { cardNumber, expiry, cvc, cardName } = req.body;
-    if (!cardNumber || !expiry || !cvc || !cardName) {
-      res.status(400).json({ message: 'Faltan datos' }); return;
-    }
-    try {
-      await paymentMethodService.saveMethod(userId, { cardNumber, expiry, cvc, cardName });
-      res.json({ message: 'Método de pago guardado correctamente' });
-    } catch (error) {
-      res.status(500).json({ message: 'Error al guardar el método de pago', error });
-    }
-  }
-);
-// Obtener método de pago guardado (admin puede ver de cualquier usuario)
-router.get('/', async (req: Request, res: Response) => {
-  const userJwt = (req as any).user;
-  let userId = getUserId(req);
-  if (userJwt && userJwt.role === 'admin' && req.query.userId) {
-    userId = parseInt(req.query.userId as string, 10);
-  }
+router.post('/', paymentValidations, async (req: Request, res: Response) => {
+  const userId = getUserId(req);
   if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
-  if (userJwt.role !== 'admin' && req.query.userId) {
-    res.status(403).json({ message: 'Prohibido' }); return;
+  const { cardNumber, expiry, cvc, cardName } = req.body;
+  try {
+    await paymentMethodService.saveMethod(userId, { cardNumber, expiry, cvc, cardName });
+    res.json({ message: 'Método de pago guardado correctamente' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al guardar el método de pago', error });
+  }
+});
+
+// Obtener método de pago guardado (solo el usuario dueño o admin)
+router.get('/', async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  const role = getUserRole(req);
+  if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
+  // Si es admin puede pasar un ?userId=... para consultar otro usuario
+  let targetUserId = userId;
+  if (role === 'admin' && req.query.userId) {
+    targetUserId = Number(req.query.userId);
+  }
+  if (role !== 'admin' && req.query.userId && Number(req.query.userId) !== userId) {
+    res.status(403).json({ message: 'Acceso denegado' }); return;
   }
   try {
-    const method = await paymentMethodService.getMethod(userId);
+    const method = await paymentMethodService.getMethod(targetUserId);
     if (!method) { res.status(404).json({ message: 'No hay método guardado' }); return; }
     res.json(method);
   } catch (error) {
     res.status(500).json({ message: 'Error al obtener el método de pago', error });
   }
 });
-// Eliminar método de pago guardado (admin puede eliminar de cualquier usuario)
-router.delete('/', async (req: Request, res: Response) => {
-  const userJwt = (req as any).user;
-  let userId = getUserId(req);
-  if (userJwt && userJwt.role === 'admin' && req.query.userId) {
-    userId = parseInt(req.query.userId as string, 10);
-  }
+
+// Eliminar método de pago (solo admin o el usuario dueño)
+router.delete('/', async (req: Request, res: Response, next: NextFunction) => {
+  const userId = getUserId(req);
+  const role = getUserRole(req);
   if (!userId) { res.status(401).json({ message: 'No autorizado' }); return; }
-  if (userJwt.role !== 'admin' && req.query.userId) {
-    res.status(403).json({ message: 'Prohibido' }); return;
+  // Si es admin puede pasar ?userId=... para borrar otro usuario
+  let targetUserId = userId;
+  if (role === 'admin' && req.query.userId) {
+    targetUserId = Number(req.query.userId);
+  }
+  if (role !== 'admin' && req.query.userId && Number(req.query.userId) !== userId) {
+    res.status(403).json({ message: 'Acceso denegado' }); return;
   }
   try {
-    await paymentMethodService.deleteMethod(userId);
+    await paymentMethodService.deleteMethod(targetUserId);
     res.json({ message: 'Método de pago eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ message: 'Error al eliminar el método de pago', error });
-  }
-});
-/**
- * @swagger
- * /api/payment_methods/all:
- *   get:
- *     summary: Obtiene todos los métodos de pago (solo admin)
- *     tags: [PaymentMethod]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Lista de métodos de pago
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/PaymentMethod'
- *       401:
- *         description: No autorizado
- *       403:
- *         description: Prohibido
- */
-router.get('/all', requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 10;
-    const { data, total } = await paymentMethodService.getAllMethods(page, limit);
-    const totalPages = Math.ceil(total / limit) || 1;
-    res.json({ data, totalPages });
-  } catch (error) {
-    res.status(500).json({ message: 'Error al obtener los métodos de pago', error });
   }
 });
 

@@ -1,9 +1,8 @@
 import express, { Request, Response } from 'express';
-import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { RowDataPacket, OkPacket } from 'mysql2';
-import { body, validationResult } from 'express-validator';
 
 const router = express.Router();
 
@@ -44,7 +43,7 @@ router.use(authenticateToken, checkJwtBlacklist);
  *       500:
  *         description: Error al obtener los usuarios de la reserva
  */
-// GET usuarios de una reserva (solo autenticado, ya protegido)
+// GET usuarios de una reserva (ahora incluye quantity)
 router.get('/:reservationId/users', (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
@@ -102,90 +101,77 @@ router.get('/:reservationId/users', (req, res, next) => {
  *       500:
  *         description: Error al añadir usuarios a la reserva
  */
-// POST añadir usuarios a una reserva (solo admin)
-router.post('/:reservationId/users',
-  requireAdmin,
-  [
-    body('user_ids').isArray({ min: 1 }).withMessage('Debes proporcionar al menos un usuario'),
-    body('quantities').optional().isArray().withMessage('Quantities debe ser un array'),
-    body('quantities.*').optional().isInt({ min: 1 }).withMessage('Cada cantidad debe ser un número entero positivo'),
-  ],
-  (req: Request, res: Response, next: express.NextFunction) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
+// POST añadir usuarios a una reserva (ahora soporta quantity)
+router.post('/:reservationId/users', (req, res, next) => {
+  (async () => {
+    const { reservationId } = req.params;
+    const { user_ids, quantities } = req.body;
+    if (!Array.isArray(user_ids) || user_ids.length === 0) {
+      res.status(400).json({ message: 'Debes proporcionar al menos un usuario' });
       return;
     }
-    (async () => {
-      const { reservationId } = req.params;
-      const { user_ids, quantities } = req.body;
-      if (!Array.isArray(user_ids) || user_ids.length === 0) {
-        res.status(400).json({ message: 'Debes proporcionar al menos un usuario' });
+    try {
+      const connection = await pool.getConnection();
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
+        [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
         return;
       }
-      try {
-        const connection = await pool.getConnection();
-        // Obtener datos de la reserva
-        const [reservationRows] = await connection.query<RowDataPacket[]>(
-          'SELECT field_id, date, slot FROM reservations WHERE id = ?',
-          [reservationId]
-        );
-        if (reservationRows.length === 0) {
-          connection.release();
-          res.status(404).json({ message: 'Reserva no encontrada' });
-          return;
-        }
-        const { field_id, date, slot } = reservationRows[0];
-        // Obtener tipo de campo
-        const [fieldRows] = await connection.query<RowDataPacket[]>(
-          'SELECT type FROM fields WHERE id = ?',
-          [field_id]
-        );
-        if (fieldRows.length === 0) {
-          connection.release();
-          res.status(404).json({ message: 'Campo no encontrado' });
-          return;
-        }
-        const fieldType = fieldRows[0].type;
-        const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-        // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
-        const [userCountRows] = await connection.query<RowDataPacket[]>(
-          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
-            JOIN reservation_users ru ON ru.reservation_id = r.id
-            WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
-          [field_id, date, slot]
-        );
-        const currentUsers = userCountRows[0]?.count || 0;
-        // Contar usuarios actuales de ESTA reserva
-        const [currentUsersRows] = await connection.query<RowDataPacket[]>(
-          'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
-          [reservationId]
-        );
-        const currentCount = currentUsersRows[0].count;
-        // Si sumamos los nuevos usuarios, ¿superamos el máximo?
-        if (currentUsers - currentCount + user_ids.length > maxUsers) {
-          connection.release();
-          res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
-          return;
-        }
-        // Añadir usuarios con quantity
-        for (let i = 0; i < user_ids.length; i++) {
-          const userId = user_ids[i];
-          const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
-          await connection.query(
-            'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)',
-            [reservationId, userId, quantity]
-          );
-        }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
+      );
+      if (fieldRows.length === 0) {
         connection.release();
-        res.json({ message: 'Usuarios añadidos a la reserva' });
-      } catch (error) {
-        console.error('Error al añadir usuarios a la reserva:', error);
-        res.status(500).json({ message: 'Error al añadir usuarios a la reserva' });
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
       }
-    })().catch(next);
-  }
-);
+      const fieldType = fieldRows[0].type;
+      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar usuarios actuales de ESTA reserva
+      const [currentUsersRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
+        [reservationId]
+      );
+      const currentCount = currentUsersRows[0].count;
+      // Si sumamos los nuevos usuarios, ¿superamos el máximo?
+      if (currentUsers - currentCount + user_ids.length > maxUsers) {
+        connection.release();
+        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
+        return;
+      }
+      // Añadir usuarios con quantity
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
+        await connection.query(
+          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)',
+          [reservationId, userId, quantity]
+        );
+      }
+      connection.release();
+      res.json({ message: 'Usuarios añadidos a la reserva' });
+    } catch (error) {
+      console.error('Error al añadir usuarios a la reserva:', error);
+      res.status(500).json({ message: 'Error al añadir usuarios a la reserva' });
+    }
+  })().catch(next);
+});
 
 /**
  * @swagger
@@ -224,94 +210,81 @@ router.post('/:reservationId/users',
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PUT reemplazar todos los usuarios de una reserva (solo admin)
-router.put('/:reservationId/users',
-  requireAdmin,
-  [
-    body('user_ids').isArray({ min: 1 }).withMessage('Debes proporcionar un array de usuarios'),
-    body('quantities').optional().isArray().withMessage('Quantities debe ser un array'),
-    body('quantities.*').optional().isInt({ min: 1 }).withMessage('Cada cantidad debe ser un número entero positivo'),
-  ],
-  (req: Request, res: Response, next: express.NextFunction) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
+// PUT reemplazar todos los usuarios de una reserva (soporta quantity)
+router.put('/:reservationId/users', (req, res, next) => {
+  (async () => {
+    const { reservationId } = req.params;
+    const { user_ids, quantities } = req.body;
+    if (!Array.isArray(user_ids)) {
+      res.status(400).json({ message: 'Debes proporcionar un array de usuarios' });
       return;
     }
-    (async () => {
-      const { reservationId } = req.params;
-      const { user_ids, quantities } = req.body;
-      if (!Array.isArray(user_ids)) {
-        res.status(400).json({ message: 'Debes proporcionar un array de usuarios' });
+    try {
+      const connection = await pool.getConnection();
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
+        [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
         return;
       }
-      try {
-        const connection = await pool.getConnection();
-        // Obtener datos de la reserva
-        const [reservationRows] = await connection.query<RowDataPacket[]>(
-          'SELECT field_id, date, slot FROM reservations WHERE id = ?',
-          [reservationId]
-        );
-        if (reservationRows.length === 0) {
-          connection.release();
-          res.status(404).json({ message: 'Reserva no encontrada' });
-          return;
-        }
-        const { field_id, date, slot } = reservationRows[0];
-        // Obtener tipo de campo
-        const [fieldRows] = await connection.query<RowDataPacket[]>(
-          'SELECT type FROM fields WHERE id = ?',
-          [field_id]
-        );
-        if (fieldRows.length === 0) {
-          connection.release();
-          res.status(404).json({ message: 'Campo no encontrado' });
-          return;
-        }
-        const fieldType = fieldRows[0].type;
-        const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-        // Contar plazas ya reservadas en ese campo, día y slot (todas las reservas)
-        const [userCountRows] = await connection.query<RowDataPacket[]>(
-          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
-            JOIN reservation_users ru ON ru.reservation_id = r.id
-            WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
-          [field_id, date, slot]
-        );
-        const currentUsers = userCountRows[0]?.count || 0;
-        // Contar plazas actuales de ESTA reserva
-        const [currentUsersRows] = await connection.query<RowDataPacket[]>(
-          'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
-          [reservationId]
-        );
-        const currentCount = currentUsersRows[0].count;
-        // Calcular plazas a añadir
-        let plazasNuevas = 0;
-        for (let i = 0; i < user_ids.length; i++) {
-          plazasNuevas += quantities && quantities[i] ? Number(quantities[i]) : 1;
-        }
-        // Si sumamos las nuevas plazas, ¿superamos el máximo?
-        if (currentUsers - currentCount + plazasNuevas > maxUsers) {
-          connection.release();
-          return res.status(400).json({ message: `El máximo de plazas para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
-        }
-        await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [reservationId]);
-        for (let i = 0; i < user_ids.length; i++) {
-          const userId = user_ids[i];
-          const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
-          await connection.query(
-            'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
-            [reservationId, userId, quantity]
-          );
-        }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
+      );
+      if (fieldRows.length === 0) {
         connection.release();
-        res.json({ message: 'Usuarios de la reserva actualizados (PUT)' });
-      } catch (error) {
-        console.error('Error al actualizar usuarios de la reserva:', error);
-        res.status(500).json({ message: 'Error al actualizar usuarios de la reserva' });
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
       }
-    })().catch(next);
-  }
-);
+      const fieldType = fieldRows[0].type;
+      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+      // Contar plazas ya reservadas en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar plazas actuales de ESTA reserva
+      const [currentUsersRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
+        [reservationId]
+      );
+      const currentCount = currentUsersRows[0].count;
+      // Calcular plazas a añadir
+      let plazasNuevas = 0;
+      for (let i = 0; i < user_ids.length; i++) {
+        plazasNuevas += quantities && quantities[i] ? Number(quantities[i]) : 1;
+      }
+      // Si sumamos las nuevas plazas, ¿superamos el máximo?
+      if (currentUsers - currentCount + plazasNuevas > maxUsers) {
+        connection.release();
+        return res.status(400).json({ message: `El máximo de plazas para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
+      }
+      await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [reservationId]);
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
+        await connection.query(
+          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
+          [reservationId, userId, quantity]
+        );
+      }
+      connection.release();
+      res.json({ message: 'Usuarios de la reserva actualizados (PUT)' });
+    } catch (error) {
+      console.error('Error al actualizar usuarios de la reserva:', error);
+      res.status(500).json({ message: 'Error al actualizar usuarios de la reserva' });
+    }
+  })().catch(next);
+});
 
 /**
  * @swagger
@@ -343,94 +316,82 @@ router.put('/:reservationId/users',
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PATCH añadir/eliminar usuarios parcialmente (solo admin)
-router.patch('/:reservationId/users',
-  requireAdmin,
-  [
-    body('add_user_ids').optional().isArray().withMessage('add_user_ids debe ser un array'),
-    body('remove_user_ids').optional().isArray().withMessage('remove_user_ids debe ser un array'),
-  ],
-  (req: Request, res: Response, next: express.NextFunction) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
-    (async () => {
-      const { reservationId } = req.params;
-      const { add_user_ids, remove_user_ids } = req.body;
-      try {
-        const connection = await pool.getConnection();
-        // Obtener datos de la reserva
-        const [reservationRows] = await connection.query<RowDataPacket[]>(
-          'SELECT field_id, date, slot FROM reservations WHERE id = ?',
-          [reservationId]
-        );
-        if (reservationRows.length === 0) {
-          connection.release();
-          res.status(404).json({ message: 'Reserva no encontrada' });
-          return;
-        }
-        const { field_id, date, slot } = reservationRows[0];
-        // Obtener tipo de campo
-        const [fieldRows] = await connection.query<RowDataPacket[]>(
-          'SELECT type FROM fields WHERE id = ?',
-          [field_id]
-        );
-        if (fieldRows.length === 0) {
-          connection.release();
-          res.status(404).json({ message: 'Campo no encontrado' });
-          return;
-        }
-        const fieldType = fieldRows[0].type;
-        const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-        // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
-        const [userCountRows] = await connection.query<RowDataPacket[]>(
-          `SELECT COUNT(ru.user_id) as count FROM reservations r
-            JOIN reservation_users ru ON ru.reservation_id = r.id
-            WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
-          [field_id, date, slot]
-        );
-        const currentUsers = userCountRows[0]?.count || 0;
-        // Contar usuarios actuales de ESTA reserva
-        const [currentUsersRows] = await connection.query<RowDataPacket[]>(
-          'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
-          [reservationId]
-        );
-        let currentCount = currentUsersRows[0].count;
-        let newCount = currentCount;
-        if (Array.isArray(add_user_ids)) newCount += add_user_ids.length;
-        if (Array.isArray(remove_user_ids)) newCount -= remove_user_ids.length;
-        if (currentUsers - currentCount + newCount > maxUsers) {
-          connection.release();
-          res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
-          return;
-        }
-        if (Array.isArray(add_user_ids)) {
-          for (const userId of add_user_ids) {
-            await connection.query(
-              'INSERT IGNORE INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-              [reservationId, userId]
-            );
-          }
-        }
-        if (Array.isArray(remove_user_ids)) {
-          for (const userId of remove_user_ids) {
-            await connection.query(
-              'DELETE FROM reservation_users WHERE reservation_id = ? AND user_id = ?',
-              [reservationId, userId]
-            );
-          }
-        }
+// PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo por campo, día y slot
+router.patch('/:reservationId/users', (req, res, next) => {
+  (async () => {
+    const { reservationId } = req.params;
+    const { add_user_ids, remove_user_ids } = req.body;
+    try {
+      const connection = await pool.getConnection();
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
+        [reservationId]
+      );
+      if (reservationRows.length === 0) {
         connection.release();
-        res.json({ message: 'Usuarios de la reserva actualizados (PATCH)' });
-      } catch (error) {
-        console.error('Error al actualizar usuarios de la reserva (PATCH):', error);
-        res.status(500).json({ message: 'Error al actualizar usuarios de la reserva (PATCH)' });
+        res.status(404).json({ message: 'Reserva no encontrada' });
+        return;
       }
-    })().catch(next);
-  }
-);
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
+      );
+      if (fieldRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
+      }
+      const fieldType = fieldRows[0].type;
+      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(ru.user_id) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar usuarios actuales de ESTA reserva
+      const [currentUsersRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
+        [reservationId]
+      );
+      let currentCount = currentUsersRows[0].count;
+      let newCount = currentCount;
+      if (Array.isArray(add_user_ids)) newCount += add_user_ids.length;
+      if (Array.isArray(remove_user_ids)) newCount -= remove_user_ids.length;
+      if (currentUsers - currentCount + newCount > maxUsers) {
+        connection.release();
+        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
+        return;
+      }
+      if (Array.isArray(add_user_ids)) {
+        for (const userId of add_user_ids) {
+          await connection.query(
+            'INSERT IGNORE INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
+            [reservationId, userId]
+          );
+        }
+      }
+      if (Array.isArray(remove_user_ids)) {
+        for (const userId of remove_user_ids) {
+          await connection.query(
+            'DELETE FROM reservation_users WHERE reservation_id = ? AND user_id = ?',
+            [reservationId, userId]
+          );
+        }
+      }
+      connection.release();
+      res.json({ message: 'Usuarios de la reserva actualizados (PATCH)' });
+    } catch (error) {
+      console.error('Error al actualizar usuarios de la reserva (PATCH):', error);
+      res.status(500).json({ message: 'Error al actualizar usuarios de la reserva (PATCH)' });
+    }
+  })().catch(next);
+});
 
 /**
  * @swagger
@@ -459,7 +420,7 @@ router.patch('/:reservationId/users',
  *       500:
  *         description: Error al eliminar usuario de la reserva
  */
-// DELETE eliminar usuario de una reserva (autenticado)
+// DELETE eliminar usuario de una reserva
 router.delete('/:reservationId/users/:userId', (req, res, next) => {
   (async () => {
     const { reservationId, userId } = req.params;
