@@ -1,17 +1,21 @@
+# Este archivo docker-compose.yml define los servicios necesarios para ejecutar la aplicación 
 services:
   db:
-    image: mysql:8
+    image: mysql:8 # Usar la imagen oficial de MySQL 8
     restart: always
+    # Configuración de la base de datos MySQL
     environment:
       MYSQL_DATABASE: dreamer
       MYSQL_ROOT_PASSWORD: root
     ports:
       - "3308:3306" # Expose MySQL on port 3308 en uno que este libre
+    # Volumen para persistir los datos de la base de datos
     volumes:
       - db_data:/var/lib/mysql
 
-  backend:
+  backend: # Servicio del backend
     build: .
+    # Configuración del entorno del backend
     environment:
       DB_HOST: db
       DB_USER: root
@@ -21,12 +25,14 @@ services:
       - db
     ports:
       - "3000:3000"
+    # Comando para esperar a que la base de datos esté lista antes de iniciar el backend
     command: sh -c "until mysqladmin ping -h db --silent; do sleep 2; done && npx ts-node src/initializeDatabase.ts && npx ts-node src/seedDatabase.ts && npm start"
     volumes:
       - ./public:/app/public
     restart: always # Reiniciar el contenedor si falla o se detiene las instancias
 
-  frontend:
+  frontend: # Servicio del frontend
+    # Construir la imagen del frontend desde el Dockerfile en el directorio ../frontend
     build:
       context: ../frontend
       dockerfile: Dockerfile

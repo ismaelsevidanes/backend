@@ -52,5 +52,3 @@ Cosas  A realizar importantes Mañana:
 - Realizar El figma completo
 - Realizar la guia de instalacion en el Readme
 - Realizar la presentacion completa
-- Actualizar la memoria de proyecto
-- Poner en el despliegue la imagen del docker
