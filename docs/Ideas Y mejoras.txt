@@ -26,5 +26,3 @@ Cosas  A realizar:
 - Ordenar los ficheros en carpetas y globalizar estilos, botones y todo eso
 
 - Realizar El figma completo
-- Realizar la guia de instalacion en el Readme
-- Realizar la presentacion completa

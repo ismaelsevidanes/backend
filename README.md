@@ -71,6 +71,79 @@ Este proyecto corresponde al backend de Pitch Dreamers, desarrollado con TypeScr
 
 ---
 
+# Guía de instalación desde cero
+
+Esta guía explica cómo instalar y ejecutar Pitch Dreamers en un PC nuevo, sin dependencias previas.
+
+## 1. Instalar Node.js
+- Descargar e instalar la última versión LTS desde: [https://nodejs.org/](https://nodejs.org/)
+- Verificar instalación:
+  ```bash
+  node -v
+  npm -v
+  ```
+
+## 2. Instalar MySQL
+- Descargar e instalar MySQL Community Server desde: [https://dev.mysql.com/downloads/mysql/](https://dev.mysql.com/downloads/mysql/)
+- Durante la instalación, anotar el usuario y contraseña de root.
+- Verificar instalación:
+  ```bash
+  mysql --version
+  ```
+
+## 3. Clonar el repositorio y preparar el backend
+- Clonar el repositorio:
+  ```bash
+  git clone https://github.com/ismaelsevidanes/backend.git
+  cd backend
+  ```
+- Instalar dependencias:
+  ```bash
+  npm install
+  ```
+
+## 4. Configurar la base de datos
+- Editar `config/database.ts` si es necesario para poner el usuario y contraseña de tu MySQL local.
+- Por defecto, usuario: `root`, contraseña: `root`, base de datos: `dreamer`.
+
+## 5. Inicializar la base de datos y las tablas
+- Ejecutar el script de inicialización:
+  ```bash
+  npx ts-node src/initializeDatabase.ts
+  ```
+- (Opcional) Insertar datos de ejemplo:
+  ```bash
+  npx ts-node src/seedDatabase.ts
+  ```
+
+## 6. Arrancar el backend
+- Iniciar el servidor en modo desarrollo:
+  ```bash
+  npm run dev
+  ```
+- El backend estará disponible en: [http://localhost:3000](http://localhost:3000)
+
+## 7. Documentación de la API
+- Acceder a la documentación Swagger en: [http://localhost:3000/v3/api-docs](http://localhost:3000/v3/api-docs)
+
+## 8. (Opcional) Instalar Docker para despliegue
+- Descargar e instalar Docker Desktop desde: [https://www.docker.com/products/docker-desktop/](https://www.docker.com/products/docker-desktop/)
+- Verificar instalación:
+  ```bash
+  docker --version
+  ```
+
+## 9. (Opcional) Despliegue con Docker
+- Asegúrate de tener Docker Desktop abierto y funcionando.
+- En la raíz del proyecto, ejecuta:
+  ```bash
+  docker-compose up --build -d
+  ```
+- Esto levantará los servicios de backend, frontend y base de datos (si tienes el `docker-compose.yml` configurado).
+- El backend y frontend estarán disponibles en los puertos configurados (por defecto 3000 y 5173).
+
+---
+
 ## Documentación de la API
 
 El backend incluye documentación automática generada con Swagger. Para acceder a ella:
