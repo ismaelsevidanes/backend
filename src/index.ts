@@ -43,6 +43,7 @@ app.use('/api/reservations', reservationsRoutes);
 app.use('/api/reservations', reservationUsersRouter);
 app.use('/api/payments', paymentsRoutes);
 
+// Punto de entrada principal del backend. Configura middlewares y rutas principales.
 app.listen(PORT, () => {
   console.log('Registrando rutas de campos...');
   console.log(`Servidor escuchando en http://localhost:${PORT}`);

@@ -4,6 +4,7 @@ import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
+import paymentMethodRoutes from './paymentMethod.routes';
 
 const router = express.Router();
 
@@ -16,6 +17,7 @@ const router = express.Router();
 
 // Proteger las rutas de pagos con el middleware de autenticación y blacklist
 router.use(authenticateToken, checkJwtBlacklist);
+router.use('/method', paymentMethodRoutes);
 
 /**
  * @swagger
@@ -327,3 +329,5 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
 });
 
 export default router;
+
+// Rutas para gestión de pagos y métodos de pago asociados a usuarios

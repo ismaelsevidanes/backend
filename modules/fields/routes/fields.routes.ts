@@ -1,9 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
+import { body, validationResult } from 'express-validator';
 
 const router = express.Router();
 
@@ -60,7 +61,10 @@ router.get('/', async (req: Request, res: Response) => {
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
   const { location, max_price, type, least_reserved, search } = req.query;
 
-  let baseQuery = 'SELECT f.*, COUNT(r.id) as reservations_count FROM fields f LEFT JOIN reservations r ON f.id = r.field_id';
+  let baseQuery = `SELECT f.*, COALESCE(SUM(ru.quantity),0) as reserved_spots
+    FROM fields f
+    LEFT JOIN reservations r ON f.id = r.field_id AND r.start_time >= CURDATE()
+    LEFT JOIN reservation_users ru ON ru.reservation_id = r.id`;
   let whereClauses: string[] = [];
   let havingClauses: string[] = [];
   let params: any[] = [];
@@ -113,7 +117,7 @@ router.get('/', async (req: Request, res: Response) => {
       return {
         ...field,
         max_reservations,
-        available_spots: max_reservations - (field.reservations_count || 0),
+        available_spots: Math.max(0, max_reservations - (field.reserved_spots || 0)),
         images,
       };
     });
@@ -130,6 +134,7 @@ router.get('/', async (req: Request, res: Response) => {
     res.json({
       data: fieldsWithSpots,
       totalPages,
+      totalItems: total
     });
   } catch (error) {
     console.error('Error al obtener los campos:', error);
@@ -158,45 +163,148 @@ router.get('/', async (req: Request, res: Response) => {
  *       500:
  *         description: Error al obtener el campo
  */
-router.get('/:id', (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  pool.getConnection()
-    .then(connection => {
-      return connection.query<RowDataPacket[]>(
-        'SELECT * FROM fields WHERE id = ?',
-        [id]
-      ).then(([fields]) => {
-        connection.release();
-        if (!fields || fields.length === 0) {
-          res.status(404).json({ message: 'Campo no encontrado' });
-          return;
-        }
-        let field = fields[0];
-        let images = [];
-        if (field.images) {
-          try {
-            images = typeof field.images === 'string' ? JSON.parse(field.images) : field.images;
-          } catch {
-            images = [];
-          }
-        }
-        const max_reservations = field.type === 'futbol7' ? 14 : 22;
-        res.json({
-          ...field,
-          max_reservations,
-          available_spots: max_reservations, // Si quieres calcular reservas, ajusta aquí
-          images,
-        });
-      });
-    })
-    .catch(error => {
-      console.error('Error al obtener el campo:', error);
-      res.status(500).json({ message: 'Error al obtener el campo' });
+  try {
+    const connection = await pool.getConnection();
+    // Obtener campo
+    const [fields] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM fields WHERE id = ?',
+      [id]
+    );
+    if (!fields || fields.length === 0) {
+      connection.release();
+      res.status(404).json({ message: 'Campo no encontrado' });
+      return;
+    }
+    let field = fields[0];
+    let images = [];
+    if (field.images) {
+      try {
+        images = typeof field.images === 'string' ? JSON.parse(field.images) : field.images;
+      } catch {
+        images = [];
+      }
+    }
+    const max_reservations = field.type === 'futbol7' ? 14 : 22;
+    // Calcular plazas reservadas para el campo (todas las reservas futuras)
+    const [reservedRows] = await connection.query<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(ru.quantity),0) as reserved
+       FROM reservations r
+       JOIN reservation_users ru ON ru.reservation_id = r.id
+       WHERE r.field_id = ? AND r.start_time >= CURDATE()`,
+      [id]
+    );
+    const reserved = reservedRows[0]?.reserved || 0;
+    connection.release();
+    res.json({
+      ...field,
+      max_reservations,
+      available_spots: Math.max(0, max_reservations - reserved),
+      images,
     });
+  } catch (error) {
+    console.error('Error al obtener el campo:', error);
+    res.status(500).json({ message: 'Error al obtener el campo' });
+  }
 });
 
+/**
+ * @swagger
+ * /api/fields/{id}/availability:
+ *   get:
+ *     summary: Consulta las plazas disponibles para un campo, fecha y slot
+ *     tags: [Fields]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID del campo
+ *       - in: query
+ *         name: date
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha de la reserva (YYYY-MM-DD)
+ *       - in: query
+ *         name: slot
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Slot horario (1-4)
+ *     responses:
+ *       200:
+ *         description: Plazas disponibles para ese campo, fecha y slot
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 availableSpots:
+ *                   type: integer
+ *                   example: 10
+ *       400:
+ *         description: Faltan parámetros
+ *       404:
+ *         description: Campo no encontrado
+ */
+router.get('/:id/availability', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    const fieldId = Number(req.params.id);
+    const { date, slot } = req.query;
+    if (!fieldId || !date || !slot) {
+      return res.status(400).json({ message: 'Faltan parámetros' });
+    }
+    try {
+      const connection = await pool.getConnection();
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [fieldId]
+      );
+      if (!fieldRows.length) {
+        connection.release();
+        return res.status(404).json({ message: 'Campo no encontrado' });
+      }
+      const maxUsers = fieldRows[0].type === 'futbol7' ? 14 : 22;
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as count
+         FROM reservations r
+         JOIN reservation_users ru ON ru.reservation_id = r.id
+         WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [fieldId, date, slot]
+      );
+      connection.release();
+      const reserved = rows[0]?.count || 0;
+      res.json({ availableSpots: Math.max(0, maxUsers - reserved) });
+    } catch (error) {
+      res.status(500).json({ message: 'Error al consultar disponibilidad' });
+    }
+  })().catch(next);
+});
+
+// Validaciones para campos
+const fieldValidations = [
+  body('name').isString().isLength({ min: 3, max: 255 }).withMessage('Nombre entre 3 y 255 caracteres'),
+  body('type').isIn(['futbol7', 'futbol11']).withMessage('Tipo debe ser futbol7 o futbol11'),
+  body('description').isString().isLength({ min: 5, max: 1000 }).withMessage('Descripción entre 5 y 1000 caracteres'),
+  body('address').isString().isLength({ min: 5, max: 255 }).withMessage('Dirección entre 5 y 255 caracteres'),
+  body('location').isString().isLength({ min: 3, max: 255 }).withMessage('Localidad entre 3 y 255 caracteres'),
+  body('price_per_hour').isFloat({ min: 0.5, max: 1000 }).withMessage('Precio por hora debe ser entre 0.5 y 1000'),
+];
+function checkValidation(req: Request, res: Response, next: NextFunction): void {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    res.status(400).json({ errors: errors.array() });
+    return;
+  }
+  next();
+}
+
 // Proteger todas las rutas siguientes con autenticación y blacklist
-router.use(authenticateToken, checkJwtBlacklist);
+router.use(authenticateToken, checkJwtBlacklist, requireAdmin);
 
 /**
  * @swagger
@@ -204,6 +312,8 @@ router.use(authenticateToken, checkJwtBlacklist);
  *   post:
  *     summary: Crea un nuevo campo
  *     tags: [Fields]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -227,27 +337,43 @@ router.use(authenticateToken, checkJwtBlacklist);
  *     responses:
  *       201:
  *         description: Campo creado correctamente
+ *       400:
+ *         description: Datos inválidos
+ *       403:
+ *         description: Acceso denegado
  *       500:
  *         description: Error al crear el campo
  */
-router.post('/', async (req: Request, res: Response) => {
-  const { name, type, description, address, location, price_per_hour } = req.body;
+router.post(
+  '/',
+  [
+    body('name').isString().isLength({ min: 3, max: 255 }).withMessage('Nombre entre 3 y 255 caracteres'),
+    body('type').isIn(['futbol7', 'futbol11']).withMessage('Tipo debe ser futbol7 o futbol11'),
+    body('description').isString().isLength({ min: 5, max: 1000 }).withMessage('Descripción entre 5 y 1000 caracteres'),
+    body('address').isString().isLength({ min: 5, max: 255 }).withMessage('Dirección entre 5 y 255 caracteres'),
+    body('location').isString().isLength({ min: 3, max: 255 }).withMessage('Localidad entre 3 y 255 caracteres'),
+    body('price_per_hour').isFloat({ min: 0.5, max: 1000 }).withMessage('Precio por hora debe ser entre 0.5 y 1000'),
+    checkValidation
+  ],
+  async (req: Request, res: Response) => {
+    const { name, type, description, address, location, price_per_hour } = req.body;
 
-  try {
-    const connection = await pool.getConnection();
-    await connection.query(
-      'INSERT INTO fields (name, type, description, address, location, price_per_hour) VALUES (?, ?, ?, ?, ?, ?)',
-      [name, type, description, address, location, price_per_hour]
-    );
-    connection.release();
+    try {
+      const connection = await pool.getConnection();
+      await connection.query(
+        'INSERT INTO fields (name, type, description, address, location, price_per_hour) VALUES (?, ?, ?, ?, ?, ?)',
+        [name, type, description, address, location, price_per_hour]
+      );
+      connection.release();
 
-    console.log(`Campo creado: ${name}, Tipo: ${type}, Ubicación: ${location}, Precio por hora: ${price_per_hour}`);
-    res.status(201).json({ message: 'Campo creado correctamente' });
-  } catch (error) {
-    console.error('Error al crear el campo:', error);
-    res.status(500).json({ message: 'Error al crear el campo' });
+      console.log(`Campo creado: ${name}, Tipo: ${type}, Ubicación: ${location}, Precio por hora: ${price_per_hour}`);
+      res.status(201).json({ message: 'Campo creado correctamente' });
+    } catch (error) {
+      console.error('Error al crear el campo:', error);
+      res.status(500).json({ message: 'Error al crear el campo' });
+    }
   }
-});
+);
 
 /**
  * @swagger
@@ -255,6 +381,8 @@ router.post('/', async (req: Request, res: Response) => {
  *   put:
  *     summary: Actualiza un campo existente
  *     tags: [Fields]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -285,36 +413,52 @@ router.post('/', async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Campo actualizado correctamente
+ *       400:
+ *         description: Datos inválidos
+ *       403:
+ *         description: Acceso denegado
  *       404:
  *         description: Campo no encontrado
  *       500:
  *         description: Error al actualizar el campo
  */
-router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
-  const { id } = req.params;
-  const { name, type, description, address, location, price_per_hour } = req.body;
+router.put(
+  '/:id',
+  [
+    body('name').isString().isLength({ min: 3, max: 255 }).withMessage('Nombre entre 3 y 255 caracteres'),
+    body('type').isIn(['futbol7', 'futbol11']).withMessage('Tipo debe ser futbol7 o futbol11'),
+    body('description').isString().isLength({ min: 5, max: 1000 }).withMessage('Descripción entre 5 y 1000 caracteres'),
+    body('address').isString().isLength({ min: 5, max: 255 }).withMessage('Dirección entre 5 y 255 caracteres'),
+    body('location').isString().isLength({ min: 3, max: 255 }).withMessage('Localidad entre 3 y 255 caracteres'),
+    body('price_per_hour').isFloat({ min: 0.5, max: 1000 }).withMessage('Precio por hora debe ser entre 0.5 y 1000'),
+    checkValidation
+  ],
+  (req: Request, res: Response, next: NextFunction) => {
+    const { id } = req.params;
+    const { name, type, description, address, location, price_per_hour } = req.body;
 
-  (async () => {
-    try {
-      const connection = await pool.getConnection();
-      const [result] = await connection.query<OkPacket>(
-        'UPDATE fields SET name = ?, type = ?, description = ?, address = ?, location = ?, price_per_hour = ? WHERE id = ?',
-        [name, type, description, address, location, price_per_hour, id]
-      );
-      connection.release();
+    (async () => {
+      try {
+        const connection = await pool.getConnection();
+        const [result] = await connection.query<OkPacket>(
+          'UPDATE fields SET name = ?, type = ?, description = ?, address = ?, location = ?, price_per_hour = ? WHERE id = ?',
+          [name, type, description, address, location, price_per_hour, id]
+        );
+        connection.release();
 
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ message: 'Campo no encontrado' });
+        if (result.affectedRows === 0) {
+          return res.status(404).json({ message: 'Campo no encontrado' });
+        }
+
+        console.log(`Campo actualizado: ID ${id}, ${name}, Tipo: ${type}, Ubicación: ${location}, Precio por hora: ${price_per_hour}`);
+        res.json({ message: 'Campo actualizado correctamente' });
+      } catch (error) {
+        console.error('Error al actualizar el campo:', error);
+        res.status(500).json({ message: 'Error al actualizar el campo' });
       }
-
-      console.log(`Campo actualizado: ID ${id}, ${name}, Tipo: ${type}, Ubicación: ${location}, Precio por hora: ${price_per_hour}`);
-      res.json({ message: 'Campo actualizado correctamente' });
-    } catch (error) {
-      console.error('Error al actualizar el campo:', error);
-      res.status(500).json({ message: 'Error al actualizar el campo' });
-    }
-  })().catch(next);
-});
+    })().catch(next);
+  }
+);
 
 /**
  * @swagger
@@ -322,6 +466,8 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
  *   patch:
  *     summary: Actualiza campos específicos de un usuario existente (Borrar en el Body los campos que no se quieren actualizar)
  *     tags: [Fields]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -352,70 +498,86 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
  *     responses:
  *       200:
  *         description: Campo actualizado correctamente
+ *       400:
+ *         description: Datos inválidos
+ *       403:
+ *         description: Acceso denegado
  *       404:
  *         description: Campo no encontrado
  *       500:
  *         description: Error al actualizar el campo
  */
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  const { id } = req.params;
-  const { name, type, description, address, location, price_per_hour } = req.body;
+router.patch(
+  '/:id',
+  [
+    body('name').optional().isString().isLength({ min: 3, max: 255 }),
+    body('type').optional().isIn(['futbol7', 'futbol11']),
+    body('description').optional().isString().isLength({ min: 5, max: 1000 }),
+    body('address').optional().isString().isLength({ min: 5, max: 255 }),
+    body('location').optional().isString().isLength({ min: 3, max: 255 }),
+    body('price_per_hour').optional().isFloat({ min: 0.5, max: 1000 }),
+    checkValidation
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { id } = req.params;
+    const { name, type, description, address, location, price_per_hour } = req.body;
 
-  try {
-    const connection = await pool.getConnection();
+    try {
+      const connection = await pool.getConnection();
 
-    const updates: string[] = [];
-    const values: any[] = [];
+      const updates: string[] = [];
+      const values: any[] = [];
 
-    if (name) {
-      updates.push('name = ?');
-      values.push(name);
-    }
-    if (type) {
-      updates.push('type = ?');
-      values.push(type);
-    }
-    if (description) {
-      updates.push('description = ?');
-      values.push(description);
-    }
-    if (address) {
-      updates.push('address = ?');
-      values.push(address);
-    }
-    if (location) {
-      updates.push('location = ?');
-      values.push(location);
-    }
-    if (price_per_hour) {
-      updates.push('price_per_hour = ?');
-      values.push(price_per_hour);
-    }
+      if (name) {
+        updates.push('name = ?');
+        values.push(name);
+      }
+      if (type) {
+        updates.push('type = ?');
+        values.push(type);
+      }
+      if (description) {
+        updates.push('description = ?');
+        values.push(description);
+      }
+      if (address) {
+        updates.push('address = ?');
+        values.push(address);
+      }
+      if (location) {
+        updates.push('location = ?');
+        values.push(location);
+      }
+      if (price_per_hour) {
+        updates.push('price_per_hour = ?');
+        values.push(price_per_hour);
+      }
 
-    if (updates.length === 0) {
-      res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
-      return;
+      if (updates.length === 0) {
+        res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+        return;
+      }
+
+      values.push(id);
+
+      const [result] = await connection.query<OkPacket>(
+        `UPDATE fields SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+      connection.release();
+
+      if (result.affectedRows === 0) {
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
+      }
+
+      res.json({ message: 'Campo actualizado correctamente' });
+    } catch (error) {
+      console.error('Error al actualizar el campo:', error);
+      next(error);
     }
-
-    values.push(id);
-
-    const [result] = await connection.query<OkPacket>(
-      `UPDATE fields SET ${updates.join(', ')} WHERE id = ?`,
-      values
-    );
-    connection.release();
-
-    if (result.affectedRows === 0) {
-      res.status(404).json({ message: 'Campo no encontrado' });
-      return;
-    }
-
-    res.json({ message: 'Campo actualizado correctamente' });
-  } catch (error) {
-    console.error('Error al actualizar el campo:', error);
-    next(error);
   }
-});
+);
 
 /**
  * @swagger
@@ -477,3 +639,5 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
 });
 
 export default router;
+
+// Rutas para gestión de campos de fútbol (CRUD, filtros, solo admin para crear/editar/eliminar)

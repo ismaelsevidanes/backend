@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
@@ -24,6 +24,9 @@ router.use(authenticateToken, checkJwtBlacklist);
  *   get:
  *     summary: Obtiene todas las reservas con paginación
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: query
  *         name: page
@@ -34,12 +37,14 @@ router.use(authenticateToken, checkJwtBlacklist);
  *     responses:
  *       200:
  *         description: Lista de reservas
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al obtener las reservas
  */
-
-// Ruta para obtener todas las reservas con paginación
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireAdmin, async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
 
@@ -50,14 +55,30 @@ router.get('/', async (req: Request, res: Response) => {
     const totalReservations = totalResult[0].total;
     const totalPages = Math.ceil(totalReservations / DEFAULT_PAGE_SIZE);
 
+    // Ahora seleccionamos también date y slot
     const [reservations] = await connection.query<RowDataPacket[]>(
-      'SELECT * FROM reservations LIMIT ? OFFSET ?',
+      'SELECT *, DATE(start_time) as date, slot FROM reservations LIMIT ? OFFSET ?',
       [DEFAULT_PAGE_SIZE, offset]
     );
     connection.release();
 
+    // Añadimos slot calculado si no existe (por compatibilidad)
+    const reservationsWithSlot = reservations.map((r: any) => {
+      let slot = r.slot;
+      if (!slot && r.start_time) {
+        const time = r.start_time.toTimeString().slice(0,5);
+        const found = SLOTS.find(s => s.start === time);
+        slot = found ? found.id : null;
+      }
+      return {
+        ...r,
+        date: r.date || (r.start_time ? r.start_time.toISOString().slice(0,10) : undefined),
+        slot
+      };
+    });
+
     res.json({
-      data: reservations,
+      data: reservationsWithSlot,
       totalPages,
     });
   } catch (error) {
@@ -66,12 +87,30 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// Definición de slots fijos para sábados y domingos
+const SLOTS = [
+  { id: 1, start: "09:00", end: "10:30" },
+  { id: 2, start: "10:30", end: "12:00" },
+  { id: 3, start: "12:00", end: "13:30" },
+  { id: 4, start: "13:30", end: "15:00" },
+];
+
+function isWeekend(dateStr: string) {
+  const date = new Date(dateStr);
+  const day = date.getDay();
+  return day === 0 || day === 6; // 0: domingo, 6: sábado
+}
+
 /**
  * @swagger
  * /api/reservations:
  *   post:
- *     summary: Crea una nueva reserva con usuarios asociados
+ *     summary: Crea una nueva reserva con usuarios asociados (soporta cantidad de plazas)
+ *     description: >-
+ *       El límite de plazas disponibles se calcula por campo, fecha y slot horario. Si ya existen reservas para ese campo, fecha y slot, solo se permitirán tantas plazas como queden libres según el tipo de campo (futbol7=14, futbol11=22).
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -81,97 +120,160 @@ router.get('/', async (req: Request, res: Response) => {
  *             properties:
  *               field_id:
  *                 type: integer
- *               start_time:
+ *               date:
  *                 type: string
- *                 format: date-time
- *               end_time:
- *                 type: string
- *                 format: date-time
+ *                 format: date
+ *                 description: Fecha de la reserva (solo sábado o domingo)
+ *               slot:
+ *                 type: integer
+ *                 description: Slot horario (1-4)
  *               total_price:
  *                 type: number
  *               user_ids:
  *                 type: array
  *                 items:
  *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       201:
  *         description: Reserva creada correctamente
  *       400:
- *         description: Debes proporcionar al menos un usuario para la reserva
+ *         description: |
+ *           Error de validación. Puede deberse a:
+ *             - No hay plazas disponibles para ese campo, fecha y hora
+ *             - Debes proporcionar al menos un usuario para la reserva
+ *             - Slot no válido
+ *             - Solo se pueden reservar sábados o domingos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: No hay plazas disponibles para ese campo, fecha y hora
+ *       401:
+ *         description: No autorizado
  *       500:
  *         description: Error al crear la reserva
  */
+router.post('/', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    const { field_id, date, slot, user_ids, quantities } = req.body;
 
-// Ruta para crear una nueva reserva con usuarios asociados
-router.post('/', async (req: Request, res: Response) => {
-  const { field_id, start_time, end_time, total_price, user_ids } = req.body;
-
-  if (!Array.isArray(user_ids) || user_ids.length === 0) {
-    res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
-    return;
-  }
-
-  try {
-    const connection = await pool.getConnection();
-    // 1. Obtener el tipo de campo
-    const [fieldRows] = await connection.query<RowDataPacket[]>(
-      'SELECT type FROM fields WHERE id = ?',
-      [field_id]
-    );
-    if (fieldRows.length === 0) {
-      connection.release();
-      res.status(404).json({ message: 'Campo no encontrado' });
+    if (!Array.isArray(user_ids) || user_ids.length === 0) {
+      res.status(400).json({ message: 'Debes proporcionar al menos un usuario para la reserva' });
       return;
     }
-    // Validar solapamiento de reservas en el mismo campo y horario
-    const [overlapRows] = await connection.query<RowDataPacket[]>(
-      `SELECT id FROM reservations WHERE field_id = ? AND (
-        (start_time < ? AND end_time > ?) OR
-        (start_time < ? AND end_time > ?) OR
-        (start_time >= ? AND end_time <= ?)
-      )`,
-      [field_id, end_time, end_time, start_time, start_time, start_time, end_time]
-    );
-    if (overlapRows.length > 0) {
-      connection.release();
-      res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
+    if (!date || !slot) {
+      res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
       return;
     }
-    const fieldType = fieldRows[0].type;
-    const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-    if (user_ids.length > maxUsers) {
-      connection.release();
-      res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+    if (!isWeekend(date)) {
+      res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
       return;
     }
-    // 2. Crear la reserva
-    const [result] = await connection.query<OkPacket>(
-      'INSERT INTO reservations (field_id, start_time, end_time, total_price) VALUES (?, ?, ?, ?)',
-      [field_id, start_time, end_time, total_price]
-    );
-    const reservationId = result.insertId;
-    // 3. Insertar usuarios asociados en la tabla intermedia
-    for (const userId of user_ids) {
-      await connection.query(
-        'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-        [reservationId, userId]
+    const slotObj = SLOTS.find(s => s.id === Number(slot));
+    if (!slotObj) {
+      res.status(400).json({ message: 'Slot no válido' });
+      return;
+    }
+    // Calcular start_time y end_time
+    const start_time = `${date} ${slotObj.start}:00`;
+    const end_time = `${date} ${slotObj.end}:00`;
+
+    try {
+      const connection = await pool.getConnection();
+      // 1. Obtener el tipo de campo y el precio
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type, price_per_hour FROM fields WHERE id = ?',
+        [field_id]
       );
+      if (fieldRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
+      }
+      const fieldType = fieldRows[0].type;
+      const pricePerHour = Number(fieldRows[0].price_per_hour);
+      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+      // 2. Contar plazas ya reservadas para ese campo, fecha y slot (de todas las reservas en ese slot)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = Number(userCountRows[0]?.count) || 0;
+      // 3. Calcular plazas a reservar (usando quantities correctamente)
+      let plazasNuevas = 0;
+      const userCountMap: Record<number, number> = {};
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        const qty = quantities && quantities[i] ? Number(quantities[i]) : 1;
+        plazasNuevas += qty;
+        userCountMap[userId] = (userCountMap[userId] || 0) + qty;
+      }
+      // Calcular el precio total según plazas reservadas y precio del campo
+      const total_price = plazasNuevas * pricePerHour;
+      if (currentUsers + plazasNuevas > maxUsers) {
+        connection.release();
+        return res.status(400).json({
+          message: `No hay suficientes plazas disponibles para este campo, día y slot. Quedan: ${maxUsers - currentUsers}`
+        });
+      }
+      // 4. Crear la reserva (agrupada: una reserva con N plazas para ese usuario)
+      const [result] = await connection.query<OkPacket>(
+        'INSERT INTO reservations (field_id, start_time, end_time, date, slot, total_price) VALUES (?, ?, ?, ?, ?, ?)',
+        [field_id, start_time, end_time, date, slot, total_price]
+      );
+      const reservationId = result.insertId;
+      // 5. Insertar usuarios asociados en la tabla intermedia (con cantidad de plazas)
+      // Debe haber solo una fila por usuario por reserva, con la cantidad total
+      const userQuantityMap: Record<number, number> = {};
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        let quantity = 1;
+        if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+          quantity = Number(quantities[i]);
+        }
+        userQuantityMap[userId] = (userQuantityMap[userId] || 0) + quantity;
+      }
+      for (const userIdStr of Object.keys(userQuantityMap)) {
+        const userId = Number(userIdStr);
+        await connection.query(
+          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
+          [reservationId, userId, userQuantityMap[userId]]
+        );
+      }
+      connection.release();
+      res.status(201).json({
+        message: 'Reserva creada correctamente',
+        reservationId,
+        plazasDisponibles: maxUsers - (currentUsers + plazasNuevas),
+        maxUsers,
+        plazasReservadas: currentUsers + plazasNuevas
+      });
+    } catch (error) {
+      console.error('Error al crear la reserva:', error);
+      res.status(500).json({ message: 'Error al crear la reserva' });
     }
-    connection.release();
-
-    res.status(201).json({ message: 'Reserva creada correctamente', reservationId });
-  } catch (error) {
-    console.error('Error al crear la reserva:', error);
-    res.status(500).json({ message: 'Error al crear la reserva' });
-  }
+  })().catch(next);
 });
 
 /**
  * @swagger
  * /api/reservations/{id}:
  *   put:
- *     summary: Actualiza una reserva existente
+ *     summary: Actualiza una reserva existente (soporta cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: id
@@ -188,41 +290,119 @@ router.post('/', async (req: Request, res: Response) => {
  *             properties:
  *               field_id:
  *                 type: integer
- *               start_time:
+ *               date:
  *                 type: string
- *                 format: date-time
- *               end_time:
- *                 type: string
- *                 format: date-time
+ *                 format: date
+ *                 description: Fecha de la reserva (solo sábado o domingo)
+ *               slot:
+ *                 type: integer
+ *                 description: Slot horario (1-4)
  *               total_price:
  *                 type: number
+ *               user_ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       200:
  *         description: Reserva actualizada correctamente
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Reserva no encontrada
  *       500:
  *         description: Error al actualizar la reserva
  */
-
-// Ruta para actualizar una reserva existente (solo datos de la reserva, no usuarios)
-router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
-  const { id } = req.params;
-  const { field_id, start_time, end_time, total_price } = req.body;
-
+router.put('/:id', requireAdmin, function (req: Request, res: Response, next: NextFunction) {
   (async () => {
+    const { id } = req.params;
+    const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
+
+    if (!date || !slot) {
+      res.status(400).json({ message: 'Debes proporcionar fecha y slot' });
+      return;
+    }
+    if (!isWeekend(date)) {
+      res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
+      return;
+    }
+    const slotObj = SLOTS.find(s => s.id === Number(slot));
+    if (!slotObj) {
+      res.status(400).json({ message: 'Slot no válido' });
+      return;
+    }
+    const start_time = `${date} ${slotObj.start}:00`;
+    const end_time = `${date} ${slotObj.end}:00`;
+
     try {
       const connection = await pool.getConnection();
-      const [result] = await connection.query<OkPacket>(
-        'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, total_price = ? WHERE id = ?',
-        [field_id, start_time, end_time, total_price, id]
+      // Validar campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
       );
+      if (fieldRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
+      }
+      const fieldType = fieldRows[0].type;
+      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+      // Validar usuarios si se pasan
+      let currentUsers = 0;
+      if (Array.isArray(user_ids)) {
+        const [userCountRows] = await connection.query<RowDataPacket[]>(
+          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+            JOIN reservation_users ru ON ru.reservation_id = r.id
+            WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
+          [field_id, date, start_time, id]
+        );
+        currentUsers = userCountRows[0]?.count || 0;
+        // Calcular plazas a reservar
+        let plazasNuevas = 0;
+        const userCountMap: Record<number, number> = {};
+        for (let i = 0; i < user_ids.length; i++) {
+          const userId = user_ids[i];
+          // Usar quantities del body, si existe, si no por defecto 1
+          let quantity = 1;
+          if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+            quantity = Number(quantities[i]);
+          }
+          userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
+          plazasNuevas += quantity;
+        }
+        if (currentUsers + plazasNuevas > maxUsers) {
+          connection.release();
+          res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+          return;
+        }
+      }
+      // Actualizar reserva
+      const [result] = await connection.query<OkPacket>(
+        'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, date = ?, slot = ?, total_price = ? WHERE id = ?',
+        [field_id, start_time, end_time, date, slot, total_price, id]
+      );
+      // Si se pasan usuarios, actualizar tabla intermedia
+      if (Array.isArray(user_ids)) {
+        await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
+        for (const userId of user_ids) {
+          await connection.query(
+            'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
+            [id, userId]
+          );
+        }
+      }
       connection.release();
-
       if (result.affectedRows === 0) {
         return res.status(404).json({ message: 'Reserva no encontrada' });
       }
-
       res.json({ message: 'Reserva actualizada correctamente' });
     } catch (error) {
       console.error('Error al actualizar la reserva:', error);
@@ -235,8 +415,11 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
  * @swagger
  * /api/reservations/{id}:
  *   patch:
- *     summary: Actualiza campos específicos de un usuario existente (Borrar en el Body los campos que no se quieren actualizar)
+ *     summary: Actualiza campos específicos de una reserva existente (parcial)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: id
@@ -253,70 +436,301 @@ router.put('/:id', (req: Request, res: Response, next: NextFunction) => {
  *             properties:
  *               field_id:
  *                 type: integer
- *               start_time:
+ *               date:
  *                 type: string
- *                 format: date-time
- *               end_time:
- *                 type: string
- *                 format: date-time
+ *                 format: date
+ *                 description: Fecha de la reserva (solo sábado o domingo)
+ *               slot:
+ *                 type: integer
+ *                 description: Slot horario (1-4)
  *               total_price:
  *                 type: number
+ *               user_ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
  *     responses:
  *       200:
  *         description: Reserva actualizada correctamente
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Reserva no encontrada
  *       500:
  *         description: Error al actualizar la reserva
  */
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => {
-  const { id } = req.params;
-  const { field_id, start_time, end_time, total_price } = req.body;
+router.patch('/:id', requireAdmin, function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    const { id } = req.params;
+    const { field_id, date, slot, total_price, user_ids, quantities } = req.body;
 
-  try {
-    const connection = await pool.getConnection();
-    const updates: string[] = [];
-    const values: any[] = [];
-
-    if (field_id) {
-      updates.push('field_id = ?');
-      values.push(field_id);
-    }
-    if (start_time) {
-      updates.push('start_time = ?');
-      values.push(start_time);
-    }
-    if (end_time) {
-      updates.push('end_time = ?');
-      values.push(end_time);
-    }
-    if (total_price) {
-      updates.push('total_price = ?');
-      values.push(total_price);
-    }
-
-    if (updates.length === 0) {
-      res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+    if ((date && !slot) || (!date && slot)) {
+      res.status(400).json({ message: 'Si actualizas la fecha o el slot, debes proporcionar ambos' });
       return;
     }
-
-    values.push(id);
-    const [result] = await connection.query<OkPacket>(
-      `UPDATE reservations SET ${updates.join(', ')} WHERE id = ?`,
-      values
-    );
-    connection.release();
-
-    if (result.affectedRows === 0) {
-      res.status(404).json({ message: 'Reserva no encontrada' });
-      return;
+    let start_time, end_time;
+    if (date && slot) {
+      if (!isWeekend(date)) {
+        res.status(400).json({ message: 'Solo se pueden reservar sábados o domingos' });
+        return;
+      }
+      const slotObj = SLOTS.find(s => s.id === Number(slot));
+      if (!slotObj) {
+        res.status(400).json({ message: 'Slot no válido' });
+        return;
+      }
+      start_time = `${date} ${slotObj.start}:00`;
+      end_time = `${date} ${slotObj.end}:00`;
     }
 
-    res.json({ message: 'Reserva actualizada correctamente' });
-  } catch (error) {
-    console.error('Error al actualizar la reserva:', error);
-    next(error);
-  }
+    try {
+      const connection = await pool.getConnection();
+      // Validar campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
+      );
+      if (fieldRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Campo no encontrado' });
+        return;
+      }
+      const fieldType = fieldRows[0].type;
+      const maxUsers = fieldType === 'futbol7' ? 14 : 22;
+      // Validar usuarios si se pasan
+      let currentUsers = 0;
+      if (Array.isArray(user_ids)) {
+        const [userCountRows] = await connection.query<RowDataPacket[]>(
+          `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+            JOIN reservation_users ru ON ru.reservation_id = r.id
+            WHERE r.field_id = ? AND DATE(r.start_time) = ? AND r.start_time = ? AND r.id != ?`,
+          [field_id, date, start_time, id]
+        );
+        currentUsers = userCountRows[0]?.count || 0;
+        // Calcular plazas a reservar
+        let plazasNuevas = 0;
+        const userCountMap: Record<number, number> = {};
+        for (let i = 0; i < user_ids.length; i++) {
+          const userId = user_ids[i];
+          // Usar quantities del body, si existe, si no por defecto 1
+          let quantity = 1;
+          if (Array.isArray(quantities) && quantities[i] !== undefined && quantities[i] !== null) {
+            quantity = Number(quantities[i]);
+          }
+          userCountMap[userId] = (userCountMap[userId] || 0) + quantity;
+          plazasNuevas += quantity;
+        }
+        if (currentUsers + plazasNuevas > maxUsers) {
+          connection.release();
+          res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - currentUsers}` });
+          return;
+        }
+      }
+      // Actualizar reserva
+      const [result] = await connection.query<OkPacket>(
+        'UPDATE reservations SET field_id = ?, start_time = ?, end_time = ?, date = ?, slot = ?, total_price = ? WHERE id = ?',
+        [field_id, start_time, end_time, date, slot, total_price, id]
+      );
+      // Si se pasan usuarios, actualizar tabla intermedia
+      if (Array.isArray(user_ids)) {
+        await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [id]);
+        for (const userId of user_ids) {
+          await connection.query(
+            'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
+            [id, userId]
+          );
+        }
+      }
+      connection.release();
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ message: 'Reserva no encontrada' });
+      }
+      res.json({ message: 'Reserva actualizada correctamente' });
+    } catch (error) {
+      console.error('Error al actualizar la reserva:', error);
+      res.status(500).json({ message: 'Error al actualizar la reserva' });
+    }
+  })().catch(next);
+});
+
+/**
+ * @swagger
+ * /api/reservations/me:
+ *   get:
+ *     summary: Obtiene todas las reservas del usuario autenticado (con filtros)
+ *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Número de página
+ *       - in: query
+ *         name: pageSize
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Tamaño de página
+ *       - in: query
+ *         name: precioMin
+ *         schema:
+ *           type: number
+ *         description: Precio mínimo de la reserva
+ *       - in: query
+ *         name: precioMax
+ *         schema:
+ *           type: number
+ *         description: Precio máximo de la reserva
+ *       - in: query
+ *         name: ubicacion
+ *         schema:
+ *           type: string
+ *         description: Filtrar por dirección del campo (búsqueda parcial)
+ *       - in: query
+ *         name: localidad
+ *         schema:
+ *           type: string
+ *         description: Filtrar por localidad del campo (búsqueda parcial)
+ *       - in: query
+ *         name: fecha
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Fecha exacta de la reserva (YYYY-MM-DD)
+ *       - in: query
+ *         name: numReservasMin
+ *         schema:
+ *           type: integer
+ *         description: Mínimo número de plazas/reservas
+ *       - in: query
+ *         name: numReservasMax
+ *         schema:
+ *           type: integer
+ *         description: Máximo número de plazas/reservas
+ *       - in: query
+ *         name: ordenarPorFecha
+ *         schema:
+ *           type: string
+ *           enum: [true, false]
+ *         description: Ordenar por fecha más cercana (true) o por fecha más lejana (false)
+ *     responses:
+ *       200:
+ *         description: Lista de reservas del usuario
+ *       401:
+ *         description: No autorizado
+ *       500:
+ *         description: Error al obtener las reservas
+ */
+router.get('/me', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    try {
+      const userJwt = (req as any).user;
+      if (!userJwt || !userJwt.id) {
+        return res.status(401).json({ message: 'No autorizado' });
+      }
+      const userId = userJwt.id;
+      const page = parseInt((req.query.page as string) || '1', 10);
+      const pageSize = parseInt((req.query.pageSize as string) || '10', 10);
+      const offset = (page - 1) * pageSize;
+      // Filtros
+      const { precioMin, precioMax, ubicacion, localidad, fecha, numReservasMin, numReservasMax, ordenarPorFecha } = req.query;
+      let whereClauses: string[] = ["ru.user_id = ?"];
+      let params: any[] = [userId];
+      if (precioMin) {
+        whereClauses.push('r.total_price >= ?');
+        params.push(Number(precioMin));
+      }
+      if (precioMax) {
+        whereClauses.push('r.total_price <= ?');
+        params.push(Number(precioMax));
+      }
+      if (ubicacion) {
+        whereClauses.push('(LOWER(f.address) LIKE ? OR LOWER(f.name) LIKE ?)');
+
+        params.push(`%${ubicacion.toString().toLowerCase()}%`);
+        params.push(`%${ubicacion.toString().toLowerCase()}%`);
+      }
+      if (localidad) {
+        whereClauses.push('LOWER(f.location) LIKE ?');
+        params.push(`%${localidad.toString().toLowerCase()}%`);
+      }
+      if (numReservasMin) {
+        whereClauses.push('ru.quantity >= ?');
+        params.push(Number(numReservasMin));
+      }
+      if (numReservasMax) {
+        whereClauses.push('ru.quantity <= ?');
+        params.push(Number(numReservasMax));
+      }
+      // El filtro de fecha ahora solo ordena, no filtra
+      let orderBy = 'ORDER BY r.start_time DESC';
+      if (ordenarPorFecha === 'true') {
+        orderBy = 'ORDER BY ABS(DATEDIFF(DATE(r.start_time), CURDATE())) ASC, r.start_time DESC';
+      } else if (fecha) {
+        orderBy = 'ORDER BY ABS(DATEDIFF(DATE(r.start_time), ?)) ASC, r.start_time DESC';
+        params.push(fecha);
+      }
+      const where = whereClauses.length ? 'WHERE ' + whereClauses.join(' AND ') : '';
+      const connection = await pool.getConnection();
+      // Total de reservas filtradas
+      const [totalResult] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) as total FROM reservation_users ru
+         JOIN reservations r ON r.id = ru.reservation_id
+         JOIN fields f ON r.field_id = f.id
+         ${where}`,
+        params
+      );
+      const totalReservations = totalResult[0]?.total || 0;
+      const totalPages = Math.ceil(totalReservations / pageSize);
+      // Buscar las reservas filtradas
+      const [reservations] = await connection.query<RowDataPacket[]>(
+        `SELECT r.*, f.name as fieldName, f.address as fieldAddress, f.location as fieldLocation, ru.quantity, DATE(r.start_time) as date, r.slot,
+          (SELECT user_id FROM reservation_users WHERE reservation_id = r.id ORDER BY user_id ASC LIMIT 1) as creator_id
+          FROM reservations r
+          JOIN reservation_users ru ON r.id = ru.reservation_id
+          JOIN fields f ON r.field_id = f.id
+          ${where}
+          ${orderBy}
+          LIMIT ? OFFSET ?`,
+        [...params, pageSize, offset]
+      );
+      connection.release();
+      // Añadir slotLabel y formatear respuesta
+      const SLOTS = [
+        { id: 1, label: "09:00 - 10:30" },
+        { id: 2, label: "10:30 - 12:00" },
+        { id: 3, label: "12:00 - 13:30" },
+        { id: 4, label: "13:30 - 15:00" },
+      ];
+      const mapped = reservations.map(r => ({
+        id: r.id,
+        fieldName: r.fieldName,
+        fieldAddress: r.fieldAddress,
+        fieldLocation: r.fieldLocation,
+        date: r.date ? new Date(r.date).toLocaleDateString('es-ES') : '',
+        slotLabel: SLOTS.find(s => s.id === Number(r.slot))?.label || r.slot,
+        total_price: r.total_price,
+        created_at: r.created_at ? new Date(r.created_at).toISOString() : '',
+        creator_id: r.creator_id,
+        status: r.status,
+        quantity: r.quantity
+      }));
+      res.json({
+        data: mapped,
+        totalPages,
+        totalReservations,
+        currentPage: page
+      });
+    } catch (error) {
+      console.error('Error al obtener las reservas del usuario:', error);
+      res.status(500).json({ message: 'Error al obtener las reservas del usuario' });
+    }
+  })().catch(next);
 });
 
 /**
@@ -325,6 +739,9 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
  *   delete:
  *     summary: Elimina una reserva existente
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: id
@@ -335,14 +752,16 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction) => 
  *     responses:
  *       200:
  *         description: Reserva eliminada correctamente
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Reserva no encontrada
  *       500:
  *         description: Error al eliminar la reserva
  */
-
-// Ruta para eliminar una reserva
-router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireAdmin, (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
 
   (async () => {
@@ -380,4 +799,95 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
   })().catch(next);
 });
 
+/**
+ * @swagger
+ * /api/reservations/{id}/cancel:
+ *   delete:
+ *     summary: Cancela una reserva (solo el creador en los primeros 15 minutos o un administrador)
+ *     tags: [Reservations]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID de la reserva
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Reserva cancelada correctamente
+ *       403:
+ *         description: No tienes permiso para cancelar esta reserva o ha pasado el tiempo permitido
+ *       404:
+ *         description: Reserva no encontrada
+ *       500:
+ *         description: Error al cancelar la reserva
+ */
+// Nueva ruta: cancelar reserva solo si es el creador (menos de 15 min) o admin
+router.delete('/:id/cancel', function (req: Request, res: Response, next: NextFunction) {
+  (async () => {
+    try {
+      const user = (req as any).user; // JWT payload
+      const { id } = req.params;
+      const connection = await pool.getConnection();
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT * FROM reservations WHERE id = ?',
+        [id]
+      );
+      if (!reservationRows.length) {
+        connection.release();
+        return res.status(404).json({ message: 'Reserva no encontrada' });
+      }
+      const reservation = reservationRows[0];
+      // Si es admin, puede cancelar siempre
+      if (user && (user as any).role === 'admin') {
+        await connection.query('DELETE FROM reservations WHERE id = ?', [id]);
+        connection.release();
+        return res.json({ message: 'Reserva cancelada por administrador' });
+      }
+      // Solo el usuario que hizo la reserva (primer user_id de reservation_users)
+      const [userRows] = await connection.query<RowDataPacket[]>(
+        'SELECT user_id FROM reservation_users WHERE reservation_id = ? ORDER BY user_id ASC LIMIT 1',
+        [id]
+      );
+      // Comprobar created_at real de la reserva
+      const createdAt = reservation.created_at ? new Date(reservation.created_at) : null;
+      const now = new Date();
+      const diffMinutes = createdAt ? (now.getTime() - createdAt.getTime()) / 60000 : null;
+      // LOG para depuración de fechas y diferencia
+      // console.log('DEBUG cancel-reservation:');
+      // console.log('createdAt:', createdAt);
+      // console.log('now:', now);
+      // console.log('diffMinutes:', diffMinutes);
+      if (
+        userRows.length > 0 &&
+        userRows[0].user_id === user.id &&
+        createdAt !== null &&
+        diffMinutes !== null &&
+        diffMinutes <= 15
+      ) {
+        await connection.query('DELETE FROM reservations WHERE id = ?', [id]);
+        connection.release();
+        return res.json({ message: 'Reserva cancelada correctamente' });
+      } else if (
+        userRows.length > 0 &&
+        userRows[0].user_id === user.id &&
+        createdAt !== null &&
+        diffMinutes !== null &&
+        diffMinutes > 15
+      ) {
+        connection.release();
+        return res.status(403).json({ message: 'Solo puedes cancelar en los primeros 15 minutos' });
+      }
+      connection.release();
+      return res.status(403).json({ message: 'No tienes permiso para cancelar esta reserva' });
+    } catch (err) {
+      next(err);  
+    }
+  })();
+});
+
 export default router;
+
+// Rutas para gestión de reservas (CRUD, filtros, solo admin para algunas acciones)

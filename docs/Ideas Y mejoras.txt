@@ -1,30 +1,28 @@
--Las reservas y pagos se eliminen de la bd cada x tiempo ???
-
--Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas)
-
--En el Readme.Md poner guia de instalacion
-
--Que al obtener el token del usuario (al hacer login) si es un user normal no obtener token por ende no poder hacer las solicitudes a las api
+-Mas organizacion de carpetas(como lo de la base de datos y ovbiamente cambiar sus rutas) y globalizacion de estilos, componentes etc
 
 -Implementar en el register y solicitud api de register un confirm password y en la modificacion del usuario
 
--Que los modelos de fields, payments y reservations tenga un campo unico (se pueden crear con nombres iguales pero no pueden ser null)
-
--En el modelo reservations:
-    - Incluir un campo que sea user_id para saber que usuarios han reservado ese campo de futbol (aunque perderia el significado de total price de la tabla)
-
--Mejorar validacón contraseña (que tenga 1 simbolo y 1 mayuscula)
-
--navegar por las pestañas de admin solo si estas logueado o registrado como administrador(rutas protegidas)
-
--Poner la misma validacion en el frontend del register que el update user del dashboard admin 
-
-- Los created_at y updated_at tienen zona horario utc+0 y no horario español (utc+2)
-
-- Implementar las validaciones en los actualizar igual, como esta en los crear
-
 - En el login, que sea nombre de usuario o correo, en el primer input
 
-- Que se muestren automaticamente los cambios al cambiar de paginacion y de limite de paginacion en el constant
+- La paginacion para lo del adminstrador sea diferente al del contants
 
-Al hacer el register que directamente se haga login con ese usuario
+-Que al hacer logout en la vista summary ahi si te tiene que redireccionar a login porque es una vista protegida y si haces login con otro usuario no te tendria que llevar a esa vista porque no hizo esa reserva
+
+- Lo des Step en las dos vistas que sea responsive
+
+- Cambiar diseño del dashboard y del fielddetail para que la informacion se mas bonita
+
+- El breacrumbs en Metodo de pago y Summary para pasos anteriores no funciona
+
+Vista metodo de pago:
+que sea accesible mediante tabulador y enter los label con las opciones
+Mejorar el diseño del circulo del radio
+
+Cosas  A realizar:
+
+- Implementar la vista administrador y que todo funcione y tenga validaciones como el back y front
+- Poner fotos reales de los campos almenos los primeros 6
+- Documentar y hacer comentarios en todo el codigo
+- Ordenar los ficheros en carpetas y globalizar estilos, botones y todo eso
+
+- Realizar El figma completo

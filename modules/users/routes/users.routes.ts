@@ -1,5 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
-import { authenticateToken,AuthenticatedRequest } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, AuthenticatedRequest, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import pool from '../../../config/database';
 import { DEFAULT_PAGE_SIZE } from '../../../config/constants';
 import { RowDataPacket, OkPacket } from 'mysql2';
@@ -40,7 +40,7 @@ router.use(authenticateToken, checkJwtBlacklist);
  */
 // Ruta para obtener todos los usuarios con paginación
 router.get('/', async (req: Request, res: Response) => {
-  console.log('Solicitud recibida en /api/users'); // Log para confirmar que la ruta está siendo alcanzada
+  //console.log('Solicitud recibida en /api/users'); // Log para confirmar que la ruta está siendo alcanzada
   const page = parseInt(req.query.page as string) || 1;
   const offset = (page - 1) * DEFAULT_PAGE_SIZE;
 
@@ -81,6 +81,10 @@ router.get('/', async (req: Request, res: Response) => {
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - password
  *             properties:
  *               name:
  *                 type: string
@@ -94,30 +98,50 @@ router.get('/', async (req: Request, res: Response) => {
  *     responses:
  *       201:
  *         description: Usuario creado correctamente
+ *       400:
+ *         description: Validación fallida
  *       500:
  *         description: Error al crear el usuario
  */
 // Ruta para crear un nuevo usuario
-router.post('/', async (req: Request, res: Response) => {
-  const { name, email, password, role } = req.body;
+router.post('/',
+  requireAdmin,
+  [
+    body('name').notEmpty().withMessage('El nombre es obligatorio'),
+    body('email').isEmail().withMessage('Debe ser un email válido'),
+    body('password')
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/[A-Z]/).withMessage('Debe tener al menos una mayúscula')
+      .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Debe tener al menos un símbolo'),
+    body('role').optional().isIn(['user', 'admin']).withMessage('El rol debe ser user o admin'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
 
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10); // Encriptar la contraseña
+    const { name, email, password, role } = req.body;
 
-    const connection = await pool.getConnection();
-    await connection.query(
-      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
-      [name, email, hashedPassword, role || 'user']
-    );
-    connection.release();
+    try {
+      const hashedPassword = await bcrypt.hash(password, 10); // Encriptar la contraseña
 
-    console.log(`Usuario creado: ${name}, Email: ${email}, Rol: ${role || 'user'}`);
-    res.status(201).json({ message: 'Usuario creado correctamente' });
-  } catch (error) {
-    console.error('Error al crear el usuario:', error);
-    res.status(500).json({ message: 'Error al crear el usuario' });
+      const connection = await pool.getConnection();
+      await connection.query(
+        'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+        [name, email, hashedPassword, role || 'user']
+      );
+      connection.release();
+
+      console.log(`Usuario creado: ${name}, Email: ${email}, Rol: ${role || 'user'}`);
+      res.status(201).json({ message: 'Usuario creado correctamente' });
+    } catch (error) {
+      console.error('Error al crear el usuario:', error);
+      res.status(500).json({ message: 'Error al crear el usuario' });
+    }
   }
-});
+);
 
 /**
  * @swagger
@@ -191,6 +215,9 @@ router.get('/me', (req, res, next) => {
  *       500:
  *         description: Error al actualizar el usuario
  */
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key';
+
 router.patch('/me', async (req, res, next) => {
   (async () => {
     try {
@@ -227,11 +254,19 @@ router.patch('/me', async (req, res, next) => {
       const sql = `UPDATE users SET ${updates.join(', ')} WHERE email = ?`;
       values.push(userJwt.email);
       const [result]: any = await connection.query(sql, values);
+      // Obtener los datos actualizados del usuario
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id, name, email, role FROM users WHERE ' + (email ? 'email = ?' : 'email = ?'),
+        [email || userJwt.email]
+      );
       connection.release();
-      if (!result || (typeof result.affectedRows === 'number' && result.affectedRows === 0)) {
+      if (!result || (typeof result.affectedRows === 'number' && result.affectedRows === 0) || rows.length === 0) {
         return res.status(404).json({ message: 'Usuario no encontrado' });
       }
-      res.json({ message: 'Usuario actualizado correctamente' });
+      // Generar nuevo token con los datos actualizados
+      const user = rows[0];
+      const token = jwt.sign({ id: user.id, role: user.role, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+      res.json({ message: 'Usuario actualizado correctamente', token });
     } catch (error) {
       next(error);
     }
@@ -270,6 +305,8 @@ router.patch('/me', async (req, res, next) => {
  *     responses:
  *       200:
  *         description: Usuario actualizado correctamente
+ *       400:
+ *         description: Validación fallida
  *       404:
  *         description: Usuario no encontrado
  *       500:
@@ -278,16 +315,18 @@ router.patch('/me', async (req, res, next) => {
 // Ruta para actualizar un usuario existente
 router.put(
   '/:id',
+  requireAdmin,
   [
-    body('name').notEmpty().withMessage('El nombre es obligatorio'),
-    body('email').isEmail().withMessage('Debe ser un email válido'),
+    body('name').optional().notEmpty().withMessage('El nombre es obligatorio'),
+    body('email').optional().isEmail().withMessage('Debe ser un email válido'),
     body('password')
       .optional()
-      .isLength({ min: 6 })
-      .withMessage('La contraseña debe tener al menos 6 caracteres'),
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/[A-Z]/).withMessage('Debe tener al menos una mayúscula')
+      .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Debe tener al menos un símbolo'),
     body('role').optional().isIn(['user', 'admin']).withMessage('El rol debe ser user o admin'),
   ],
-  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  async (req: Request, res: Response, next: NextFunction) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       res.status(400).json({ errors: errors.array() });
@@ -332,7 +371,7 @@ router.put(
  * @swagger
  * /api/users/{id}:
  *   patch:
- *     summary: Actualiza campos específicos de un usuario existente (Borrar en el Body los campos que no se quieren actualizar)
+ *     summary: Actualiza campos específicos de un usuario existente
  *     tags: [Users]
  *     parameters:
  *       - in: path
@@ -360,64 +399,85 @@ router.put(
  *     responses:
  *       200:
  *         description: Usuario actualizado correctamente
+ *       400:
+ *         description: Validación fallida
  *       404:
  *         description: Usuario no encontrado
  *       500:
  *         description: Error al actualizar el usuario
  */
-router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  const { id } = req.params;
-  const { name, email, password, role } = req.body;
-
-  try {
-    const connection = await pool.getConnection();
-
-    // Construir dinámicamente la consulta de actualización
-    const updates: string[] = [];
-    const values: any[] = [];
-
-    if (name) {
-      updates.push('name = ?');
-      values.push(name);
-    }
-    if (email) {
-      updates.push('email = ?');
-      values.push(email);
-    }
-    if (password) {
-      const hashedPassword = await bcrypt.hash(password, 10);
-      updates.push('password = ?');
-      values.push(hashedPassword);
-    }
-    if (role) {
-      updates.push('role = ?');
-      values.push(role);
-    }
-
-    if (updates.length === 0) {
-      res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+router.patch('/:id',
+  requireAdmin,
+  [
+    body('name').optional().notEmpty().withMessage('El nombre es obligatorio'),
+    body('email').optional().isEmail().withMessage('Debe ser un email válido'),
+    body('password')
+      .optional()
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/[A-Z]/).withMessage('Debe tener al menos una mayúscula')
+      .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Debe tener al menos un símbolo'),
+    body('role').optional().isIn(['user', 'admin']).withMessage('El rol debe ser user o admin'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
       return;
     }
 
-    values.push(id);
+    const { id } = req.params;
+    const { name, email, password, role } = req.body;
 
-    const [result] = await connection.query<OkPacket>(
-      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
-      values
-    );
-    connection.release();
+    try {
+      const connection = await pool.getConnection();
 
-    if (result.affectedRows === 0) {
-      res.status(404).json({ message: 'Usuario no encontrado' });
-      return;
+      // Construir dinámicamente la consulta de actualización
+      const updates: string[] = [];
+      const values: any[] = [];
+
+      if (name) {
+        updates.push('name = ?');
+        values.push(name);
+      }
+      if (email) {
+        updates.push('email = ?');
+        values.push(email);
+      }
+      if (password) {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updates.push('password = ?');
+        values.push(hashedPassword);
+      }
+      if (role) {
+        updates.push('role = ?');
+        values.push(role);
+      }
+
+      if (updates.length === 0) {
+        res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+        return;
+      }
+
+      values.push(id);
+
+      const [result] = await connection.query<OkPacket>(
+        `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
+        values
+      );
+      connection.release();
+
+      if (result.affectedRows === 0) {
+        res.status(404).json({ message: 'Usuario no encontrado' });
+        return;
+      }
+
+      res.json({ message: 'Usuario actualizado correctamente' });
+    } catch (error) {
+      console.error('Error al actualizar el usuario:', error);
+      next(error); // Pasar el error al middleware de manejo de errores
     }
-
-    res.json({ message: 'Usuario actualizado correctamente' });
-  } catch (error) {
-    console.error('Error al actualizar el usuario:', error);
-    next(error); // Pasar el error al middleware de manejo de errores
   }
-});
+);
 
 /**
  * @swagger
@@ -441,7 +501,7 @@ router.patch('/:id', async (req: Request, res: Response, next: NextFunction): Pr
  *         description: Error al eliminar el usuario
  */
 // Ruta para eliminar un usuario
-router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
+router.delete('/:id', requireAdmin, (req: Request, res: Response, next: NextFunction) => {
   const { id } = req.params;
 
   (async () => {
@@ -481,5 +541,76 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
   })().catch(next);
 });
 
+// Validaciones para PATCH /me (usuario autenticado)
+router.patch('/me',
+  [
+    body('name').optional().notEmpty().withMessage('El nombre es obligatorio'),
+    body('email').optional().isEmail().withMessage('Debe ser un email válido'),
+    body('password')
+      .optional()
+      .isLength({ min: 8 }).withMessage('La contraseña debe tener al menos 8 caracteres')
+      .matches(/[A-Z]/).withMessage('Debe tener al menos una mayúscula')
+      .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Debe tener al menos un símbolo'),
+  ],
+  async (req: Request, res: Response, next: NextFunction) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ errors: errors.array() });
+      return;
+    }
+    const userJwt = (req as any).user;
+    if (!userJwt || !userJwt.email) {
+      res.status(401).json({ message: 'No autorizado' });
+      return;
+    }
+    const { name, email, password } = req.body;
+    try {
+      const connection = await pool.getConnection();
+      const updates: string[] = [];
+      const values: any[] = [];
+      if (name) {
+        updates.push('name = ?');
+        values.push(name);
+      }
+      if (email) {
+        updates.push('email = ?');
+        values.push(email);
+      }
+      if (password) {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        updates.push('password = ?');
+        values.push(hashedPassword);
+      }
+      if (updates.length === 0) {
+        connection.release();
+        res.status(400).json({ message: 'No se proporcionaron campos para actualizar' });
+        return;
+      }
+      // Construir la query y los valores dinámicamente
+      const sql = `UPDATE users SET ${updates.join(', ')} WHERE email = ?`;
+      values.push(userJwt.email);
+      const [result]: any = await connection.query(sql, values);
+      // Obtener los datos actualizados del usuario
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id, name, email, role FROM users WHERE ' + (email ? 'email = ?' : 'email = ?'),
+        [email || userJwt.email]
+      );
+      connection.release();
+      if (!result || (typeof result.affectedRows === 'number' && result.affectedRows === 0) || rows.length === 0) {
+        res.status(404).json({ message: 'Usuario no encontrado' });
+        return;
+      }
+      // Generar nuevo token con los datos actualizados
+      const user = rows[0];
+      const token = jwt.sign({ id: user.id, role: user.role, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+      res.json({ message: 'Usuario actualizado correctamente', token });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 
 export default router;
+
+// Rutas para gestión de usuarios (CRUD, solo admin para algunas acciones)

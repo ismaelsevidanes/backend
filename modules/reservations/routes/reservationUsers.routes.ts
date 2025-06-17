@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { authenticateToken } from '../../../src/middlewares/authMiddleware';
+import { authenticateToken, requireAdmin } from '../../../src/middlewares/authMiddleware';
 import { checkJwtBlacklist } from '../../../src/middlewares/jwtBlacklist';
 import pool from '../../../config/database';
 import { RowDataPacket, OkPacket } from 'mysql2';
@@ -13,8 +13,11 @@ router.use(authenticateToken, checkJwtBlacklist);
  * @swagger
  * /api/reservations/{reservationId}/users:
  *   get:
- *     summary: Obtiene los usuarios asociados a una reserva
+ *     summary: Obtiene los usuarios asociados a una reserva (incluye cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -24,18 +27,37 @@ router.use(authenticateToken, checkJwtBlacklist);
  *         description: ID de la reserva
  *     responses:
  *       200:
- *         description: Lista de usuarios asociados a la reserva
+ *         description: Lista de usuarios asociados a la reserva y su cantidad de plazas
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   name:
+ *                     type: string
+ *                   email:
+ *                     type: string
+ *                   quantity:
+ *                     type: integer
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al obtener los usuarios de la reserva
  */
-// GET usuarios de una reserva
-router.get('/:reservationId/users', (req, res, next) => {
+// GET usuarios de una reserva (ahora incluye quantity)
+router.get('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
     try {
       const connection = await pool.getConnection();
       const [users] = await connection.query<RowDataPacket[]>(
-        `SELECT u.id, u.name, u.email FROM users u
+        `SELECT u.id, u.name, u.email, ru.quantity FROM users u
          INNER JOIN reservation_users ru ON ru.user_id = u.id
          WHERE ru.reservation_id = ?`,
         [reservationId]
@@ -53,8 +75,11 @@ router.get('/:reservationId/users', (req, res, next) => {
  * @swagger
  * /api/reservations/{reservationId}/users:
  *   post:
- *     summary: Añade uno o varios usuarios a una reserva existente
+ *     summary: Añade uno o varios usuarios a una reserva existente (soporta cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -73,52 +98,84 @@ router.get('/:reservationId/users', (req, res, next) => {
  *                 type: array
  *                 items:
  *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       200:
  *         description: Usuarios añadidos a la reserva
  *       400:
  *         description: Debes proporcionar al menos un usuario
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al añadir usuarios a la reserva
  */
-// POST añadir usuarios a una reserva con validación de máximo según tipo de campo
-router.post('/:reservationId/users', (req, res, next) => {
+// POST añadir usuarios a una reserva (ahora soporta quantity)
+router.post('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { user_ids } = req.body;
+    const { user_ids, quantities } = req.body;
     if (!Array.isArray(user_ids) || user_ids.length === 0) {
       res.status(400).json({ message: 'Debes proporcionar al menos un usuario' });
       return;
     }
     try {
       const connection = await pool.getConnection();
-      // Obtener el tipo de campo de la reserva
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
         [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
+        return;
+      }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
       );
       if (fieldRows.length === 0) {
         connection.release();
-        res.status(404).json({ message: 'Reserva o campo no encontrado' });
+        res.status(404).json({ message: 'Campo no encontrado' });
         return;
       }
       const fieldType = fieldRows[0].type;
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // Contar usuarios actuales
+      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar usuarios actuales de ESTA reserva
       const [currentUsersRows] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
+        'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
         [reservationId]
       );
       const currentCount = currentUsersRows[0].count;
-      if (currentCount + user_ids.length > maxUsers) {
+      // Si sumamos los nuevos usuarios, ¿superamos el máximo?
+      if (currentUsers - currentCount + user_ids.length > maxUsers) {
         connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
         return;
       }
-      for (const userId of user_ids) {
+      // Añadir usuarios con quantity
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
         await connection.query(
-          'INSERT IGNORE INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-          [reservationId, userId]
+          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)',
+          [reservationId, userId, quantity]
         );
       }
       connection.release();
@@ -134,8 +191,11 @@ router.post('/:reservationId/users', (req, res, next) => {
  * @swagger
  * /api/reservations/{reservationId}/users:
  *   put:
- *     summary: Reemplaza todos los usuarios de una reserva
+ *     summary: Reemplaza todos los usuarios de una reserva (soporta cantidad de plazas)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -154,63 +214,88 @@ router.post('/:reservationId/users', (req, res, next) => {
  *                 type: array
  *                 items:
  *                   type: integer
+ *               quantities:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Cantidad de plazas por usuario (opcional, por defecto 1)
  *     responses:
  *       200:
  *         description: Usuarios de la reserva actualizados
  *       400:
  *         description: Debes proporcionar un array de usuarios
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PUT reemplazar todos los usuarios de una reserva con validación de máximo y solapamiento de reservas
-router.put('/:reservationId/users', (req, res, next) => {
+// PUT reemplazar todos los usuarios de una reserva (soporta quantity)
+router.put('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { user_ids, start_time, end_time, field_id } = req.body;
+    const { user_ids, quantities } = req.body;
     if (!Array.isArray(user_ids)) {
       res.status(400).json({ message: 'Debes proporcionar un array de usuarios' });
       return;
     }
     try {
       const connection = await pool.getConnection();
-      // Validar solapamiento de reservas si se actualiza el horario o campo
-      if (start_time && end_time && field_id) {
-        const [overlapRows] = await connection.query<RowDataPacket[]>(
-          `SELECT id FROM reservations WHERE field_id = ? AND id != ? AND (
-            (start_time < ? AND end_time > ?) OR
-            (start_time < ? AND end_time > ?) OR
-            (start_time >= ? AND end_time <= ?)
-          )`,
-          [field_id, reservationId, end_time, end_time, start_time, start_time, start_time, end_time]
-        );
-        if (overlapRows.length > 0) {
-          connection.release();
-          res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
-          return;
-        }
-      }
-      // Obtener el tipo de campo de la reserva
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
         [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
+        return;
+      }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
       );
       if (fieldRows.length === 0) {
         connection.release();
-        res.status(404).json({ message: 'Reserva o campo no encontrado' });
+        res.status(404).json({ message: 'Campo no encontrado' });
         return;
       }
       const fieldType = fieldRows[0].type;
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      if (user_ids.length > maxUsers) {
+      // Contar plazas ya reservadas en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COALESCE(SUM(ru.quantity),0) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar plazas actuales de ESTA reserva
+      const [currentUsersRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COALESCE(SUM(quantity),0) as count FROM reservation_users WHERE reservation_id = ?',
+        [reservationId]
+      );
+      const currentCount = currentUsersRows[0].count;
+      // Calcular plazas a añadir
+      let plazasNuevas = 0;
+      for (let i = 0; i < user_ids.length; i++) {
+        plazasNuevas += quantities && quantities[i] ? Number(quantities[i]) : 1;
+      }
+      // Si sumamos las nuevas plazas, ¿superamos el máximo?
+      if (currentUsers - currentCount + plazasNuevas > maxUsers) {
         connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
-        return;
+        return res.status(400).json({ message: `El máximo de plazas para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
       }
       await connection.query('DELETE FROM reservation_users WHERE reservation_id = ?', [reservationId]);
-      for (const userId of user_ids) {
+      for (let i = 0; i < user_ids.length; i++) {
+        const userId = user_ids[i];
+        const quantity = Array.isArray(quantities) && quantities[i] ? quantities[i] : 1;
         await connection.query(
-          'INSERT INTO reservation_users (reservation_id, user_id) VALUES (?, ?)',
-          [reservationId, userId]
+          'INSERT INTO reservation_users (reservation_id, user_id, quantity) VALUES (?, ?, ?)',
+          [reservationId, userId, quantity]
         );
       }
       connection.release();
@@ -228,6 +313,9 @@ router.put('/:reservationId/users', (req, res, next) => {
  *   patch:
  *     summary: Actualiza usuarios parcialmente de una reserva (Borrar en el Body los campos que no se quieren actualizar)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -249,45 +337,52 @@ router.put('/:reservationId/users', (req, res, next) => {
  *     responses:
  *       200:
  *         description: Usuarios de la reserva actualizados
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       500:
  *         description: Error al actualizar usuarios de la reserva
  */
-// PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo y solapamiento de reservas
-router.patch('/:reservationId/users', (req, res, next) => {
+// PATCH añadir y/o eliminar usuarios parcialmente con validación de máximo por campo, día y slot
+router.patch('/:reservationId/users', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId } = req.params;
-    const { add_user_ids, remove_user_ids, start_time, end_time, field_id } = req.body;
+    const { add_user_ids, remove_user_ids } = req.body;
     try {
       const connection = await pool.getConnection();
-      // Validar solapamiento de reservas si se actualiza el horario o campo
-      if (start_time && end_time && field_id) {
-        const [overlapRows] = await connection.query<RowDataPacket[]>(
-          `SELECT id FROM reservations WHERE field_id = ? AND id != ? AND (
-            (start_time < ? AND end_time > ?) OR
-            (start_time < ? AND end_time > ?) OR
-            (start_time >= ? AND end_time <= ?)
-          )`,
-          [field_id, reservationId, end_time, end_time, start_time, start_time, start_time, end_time]
-        );
-        if (overlapRows.length > 0) {
-          connection.release();
-          res.status(400).json({ message: 'Ya existe una reserva para este campo en ese horario' });
-          return;
-        }
-      }
-      // Obtener el tipo de campo de la reserva
-      const [fieldRows] = await connection.query<RowDataPacket[]>(
-        `SELECT f.type FROM reservations r INNER JOIN fields f ON r.field_id = f.id WHERE r.id = ?`,
+      // Obtener datos de la reserva
+      const [reservationRows] = await connection.query<RowDataPacket[]>(
+        'SELECT field_id, date, slot FROM reservations WHERE id = ?',
         [reservationId]
+      );
+      if (reservationRows.length === 0) {
+        connection.release();
+        res.status(404).json({ message: 'Reserva no encontrada' });
+        return;
+      }
+      const { field_id, date, slot } = reservationRows[0];
+      // Obtener tipo de campo
+      const [fieldRows] = await connection.query<RowDataPacket[]>(
+        'SELECT type FROM fields WHERE id = ?',
+        [field_id]
       );
       if (fieldRows.length === 0) {
         connection.release();
-        res.status(404).json({ message: 'Reserva o campo no encontrado' });
+        res.status(404).json({ message: 'Campo no encontrado' });
         return;
       }
       const fieldType = fieldRows[0].type;
       const maxUsers = fieldType === 'futbol7' ? 14 : 22;
-      // Contar usuarios actuales
+      // Contar usuarios ya reservados en ese campo, día y slot (todas las reservas)
+      const [userCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(ru.user_id) as count FROM reservations r
+          JOIN reservation_users ru ON ru.reservation_id = r.id
+          WHERE r.field_id = ? AND r.date = ? AND r.slot = ?`,
+        [field_id, date, slot]
+      );
+      const currentUsers = userCountRows[0]?.count || 0;
+      // Contar usuarios actuales de ESTA reserva
       const [currentUsersRows] = await connection.query<RowDataPacket[]>(
         'SELECT COUNT(*) as count FROM reservation_users WHERE reservation_id = ?',
         [reservationId]
@@ -296,9 +391,9 @@ router.patch('/:reservationId/users', (req, res, next) => {
       let newCount = currentCount;
       if (Array.isArray(add_user_ids)) newCount += add_user_ids.length;
       if (Array.isArray(remove_user_ids)) newCount -= remove_user_ids.length;
-      if (newCount > maxUsers) {
+      if (currentUsers - currentCount + newCount > maxUsers) {
         connection.release();
-        res.status(400).json({ message: `El máximo de usuarios para este campo es ${maxUsers}` });
+        res.status(400).json({ message: `El máximo de usuarios para este campo, día y slot es ${maxUsers}. Quedan disponibles: ${maxUsers - (currentUsers - currentCount)}` });
         return;
       }
       if (Array.isArray(add_user_ids)) {
@@ -332,6 +427,9 @@ router.patch('/:reservationId/users', (req, res, next) => {
  *   delete:
  *     summary: Elimina un usuario de una reserva (tabla intermedia)
  *     tags: [Reservations]
+ *     security:
+ *       - bearerAuth: []
+ *     x-admin: true
  *     parameters:
  *       - in: path
  *         name: reservationId
@@ -348,13 +446,17 @@ router.patch('/:reservationId/users', (req, res, next) => {
  *     responses:
  *       200:
  *         description: Usuario eliminado de la reserva
+ *       401:
+ *         description: No autorizado
+ *       403:
+ *         description: Prohibido (solo admin)
  *       404:
  *         description: Usuario no estaba en la reserva
  *       500:
  *         description: Error al eliminar usuario de la reserva
  */
 // DELETE eliminar usuario de una reserva
-router.delete('/:reservationId/users/:userId', (req, res, next) => {
+router.delete('/:reservationId/users/:userId', requireAdmin, (req, res, next) => {
   (async () => {
     const { reservationId, userId } = req.params;
     try {
@@ -377,3 +479,5 @@ router.delete('/:reservationId/users/:userId', (req, res, next) => {
 });
 
 export default router;
+
+// Rutas para gestionar usuarios asociados a reservas (añadir, quitar, actualizar cantidad)

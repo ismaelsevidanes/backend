@@ -2,6 +2,7 @@ import mysql from 'mysql2/promise';
 import pool from '../config/database';
 import 'dotenv/config';
 
+// Script para crear la base de datos y las tablas si no existen
 async function initializeDatabase() {
   try {
     // Usa process.env.DB_HOST si está definida, si no, usa 'localhost'
@@ -49,13 +50,15 @@ async function initializeDatabase() {
         );
       `);
 
-      // Crear tabla 'reservations'
+      // Crear tabla 'reservations' con campos date y slot
       await dbConnection.query(`
         CREATE TABLE IF NOT EXISTS reservations (
           id INT AUTO_INCREMENT PRIMARY KEY,
           field_id INT NOT NULL,
           start_time TIMESTAMP NOT NULL,
           end_time TIMESTAMP NOT NULL,
+          date DATE NOT NULL,
+          slot TINYINT NOT NULL,
           total_price DECIMAL(8, 2) NOT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -77,13 +80,29 @@ async function initializeDatabase() {
         );
       `);
 
-      // Crear tabla 'reservation_users' (relación muchos a muchos)
+      // Crear tabla 'reservation_users' (relación muchos a muchos, con cantidad de plazas)
       await dbConnection.query(`
         CREATE TABLE IF NOT EXISTS reservation_users (
           reservation_id INT NOT NULL,
           user_id INT NOT NULL,
+          quantity INT NOT NULL DEFAULT 1,
           PRIMARY KEY (reservation_id, user_id),
           FOREIGN KEY (reservation_id) REFERENCES reservations(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+      `);
+
+      // Crear tabla 'payment_methods' asociada a users
+      await dbConnection.query(`
+        CREATE TABLE IF NOT EXISTS payment_methods (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id INT NOT NULL,
+          type VARCHAR(20) NOT NULL,
+          encrypted_data TEXT NOT NULL,
+          iv VARCHAR(64) NOT NULL,
+          last4 VARCHAR(4) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
       `);

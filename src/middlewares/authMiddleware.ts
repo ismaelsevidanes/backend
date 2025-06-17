@@ -27,3 +27,12 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     next();
   });
 }
+
+// Middleware de autenticación JWT y comprobación de rol admin
+export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  if (!req.user || typeof req.user !== 'object' || (req.user as any).role !== 'admin') {
+    res.status(403).json({ message: 'Acceso denegado. Se requiere rol de administrador.' });
+    return;
+  }
+  next();
+}

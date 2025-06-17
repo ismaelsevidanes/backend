@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 
-// Blacklist de tokens JWT en memoria
+// Blacklist de tokens JWT para invalidar sesiones (logout, etc)
 const jwtBlacklist = new Set<string>();
 
 // Middleware para comprobar si el token está en la blacklist
