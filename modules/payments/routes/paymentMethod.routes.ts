@@ -201,6 +201,36 @@ const paymentValidations = [
  *       500:
  *         description: Error al obtener los métodos de pago
  */
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     PaymentMethod:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         user_id:
+ *           type: integer
+ *         user_name:
+ *           type: string
+ *         user_email:
+ *           type: string
+ *         type:
+ *           type: string
+ *         encrypted_data:
+ *           type: string
+ *         iv:
+ *           type: string
+ *         last4:
+ *           type: string
+ *         created_at:
+ *           type: string
+ *           format: date-time
+ *         updated_at:
+ *           type: string
+ *           format: date-time
+ */
 
 // Rutas para gestión de métodos de pago guardados (añadir, obtener, eliminar)
 

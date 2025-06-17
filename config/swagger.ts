@@ -19,8 +19,8 @@ const options: swaggerJsdoc.Options = {
     ],
     servers: [
       {
-        url: 'http://localhost:3000', // Cambiar esto si se usa otro puerto
-        //url: 'https://pitchdreamers.duckdns.org', // URL de producción
+        //url: 'http://localhost:3000', // Cambiar esto si se usa otro puerto
+        url: 'https://pitchdreamers.duckdns.org', // URL de producción
       },
     ],
     components: {
