@@ -45,6 +45,6 @@ const swaggerSpec = swaggerJsdoc(options);
 
 export const setupSwagger = (app: Express): void => {
   app.use('/v3/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-  console.log('Swagger disponible en http://localhost:3000/v3/api-docs');
-  //console.log('Swagger disponible en https://pitchdreamers.duckdns.org/v3/api-docs');
+  //console.log('Swagger disponible en http://localhost:3000/v3/api-docs');
+  console.log('Swagger disponible en https://pitchdreamers.duckdns.org/v3/api-docs');
 };
